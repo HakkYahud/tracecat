@@ -1,26 +1,24 @@
-name: get_edr_configuration
-namespace: integrations.tehtris
-title: Get EDR Configuration
-description: GET Tehtris EDR Configuration.
-display_group: Tehtris
-secrets:
-  - name: tehtris
-    keys:
-      - b64key
-    optional_keys: null
-    optional: false
-expects:
-  trigram:
-    type: str
-    description: The EDR trigram to target
-    default: null
-steps:
-  - ref: get_edr_configuration
-    action: core.http_request
-    args:
-      url: https://${{ TRIGGER.trigram }}.api.tehtris.net/api/edr/v2/configuration/edr
-      method: GET
-      headers:
-        x-apikey: ${{ SECRETS.tehtris.b64key }}
-returns: ${{ steps.get_edr_configuration.result }}
+type: action
+definition:
+  title: Get EDR Configuration
+  description: GET Tehtris EDR Configuration
+  display_group: Tehtris
+  namespace: integrations.tehtris
+  name: get_edr_configuration
+  secrets:
+    - name: tehtris
+      keys: ["b64key"]
+  expects:
+    trigram:
+      type: str
+      description: The EDR trigram to target
+  steps:
+    - ref: get_edr_configuration
+      action: core.http_request
+      args:
+        url: https://${{ inputs.trigram }}.api.tehtris.net/api/edr/v2/configuration/edr
+        method: GET
+        headers:
+          x-apikey: ${{ SECRETS.tehtris.b64key }}
+  returns: ${{ steps.get_edr_configuration.result }}
 
