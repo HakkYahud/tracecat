@@ -1,0 +1,33 @@
+type: action
+definition:
+  title: Add Observable
+  description: Add observables to a case
+  display_group: TheHive
+  namespace: integrations.thehive
+  name: add_observable
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    id_case:
+      type: str
+      description: Case ID
+    group_task:
+      type: str
+      description: The ID of the case to update
+    title_task:
+      type: str
+      description: Title task
+  steps:
+    - ref: update_case
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/case/${{ inputs.id_case }}/task
+        method: POST
+        headers:
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+          Content-Type: application/json
+        payload:
+          group: ${{ inputs.group_task }}
+          title: ${{ inputs.title_task }} 
+  returns: ${{ steps.update_case.result }}
