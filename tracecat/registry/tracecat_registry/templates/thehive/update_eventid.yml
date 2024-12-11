@@ -1,0 +1,29 @@
+type: action
+definition:
+  title: Update eventid
+  description: Update eventid custom field
+  display_group: TheHive
+  namespace: integrations.thehive
+  name: update_eventid
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    id_case:
+      type: str
+      description: Case ID
+    event_id:
+      type: int
+      description: Event ID value from XDR event
+  steps:
+    - ref: update_case
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/case/${{ inputs.id_case }}
+        method: PATCH
+        headers:
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+          Content-Type: application/json
+        payload:
+          customFields.eventid.integer: ${{ inputs.event_id }} 
+  returns: ${{ steps.update_case.result }}

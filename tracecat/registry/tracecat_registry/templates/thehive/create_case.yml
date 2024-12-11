@@ -1,0 +1,34 @@
+type: action
+definition:
+  title: Create Case
+  description: Create Case on TheHive
+  display_group: TheHive
+  namespace: integrations.thehive
+  name: create_case
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    title_case:
+      type: str
+      description: Case title
+    description_case:
+      type: str
+      description: Description of the case, support markdown
+    template_case:
+      type: str
+      description: Template name to use when creating the case
+  steps:
+    - ref: create_case
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/case
+        method: POST
+        headers:
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+          Content-Type: application/json
+        payload:
+          title: ${{ inputs.title_case }}
+          description: ${{ inputs.description_case }}
+          template: ${{ inputs.template_case }} 
+  returns: ${{ steps.create_case.result }}
