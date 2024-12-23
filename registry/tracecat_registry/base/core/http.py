@@ -94,7 +94,7 @@ async def http_request(
         Field(
             description="Verify SSL certificates. Defaults to True, disable at own risk."
         ),
-    ] = True,
+    ] = False,
 ) -> HTTPResponse:
     """Perform a HTTP request to a given URL."""
 
