@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { KeyRoundIcon, LucideIcon } from "lucide-react"
+import { KeyRoundIcon, LucideIcon, SettingsIcon, UsersIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -13,7 +13,26 @@ type NavItem = {
   href: string
 }
 
-const navItems: NavItem[] = [
+const settingsNavItems: NavItem[] = [
+  {
+    title: "Git Repository",
+    href: "/organization/settings/git",
+  },
+  {
+    title: "Single Sign-On",
+    href: "/organization/settings/sso",
+  },
+  {
+    title: "OAuth",
+    href: "/organization/settings/oauth",
+  },
+  {
+    title: "Authentication",
+    href: "/organization/settings/auth",
+  },
+]
+
+const secretNavItems: NavItem[] = [
   {
     title: "Credentials",
     href: "/organization/credentials",
@@ -21,6 +40,17 @@ const navItems: NavItem[] = [
   {
     title: "SSH Keys",
     href: "/organization/ssh-keys",
+  },
+]
+
+const userNavItems: NavItem[] = [
+  {
+    title: "Members",
+    href: "/organization/members",
+  },
+  {
+    title: "Sessions",
+    href: "/organization/sessions",
   },
 ]
 
@@ -32,15 +62,24 @@ interface SidebarNavProps extends React.HTMLAttributes<HTMLElement> {
 
 export function OrganizationSidebarNav() {
   return (
-    <div className="h-full space-y-4 border-r pr-4 pt-16">
+    <div className="h-full space-y-4 pr-4 pt-16">
       <div className="space-y-0.5">
         <h2 className="text-xl font-bold tracking-tight">Organization</h2>
       </div>
-      <SidebarNavBlock title="Secrets" icon={KeyRoundIcon} items={navItems} />
+      <SidebarNavBlock
+        title="Settings"
+        icon={SettingsIcon}
+        items={settingsNavItems}
+      />
+      <SidebarNavBlock
+        title="Secrets"
+        icon={KeyRoundIcon}
+        items={secretNavItems}
+      />
+      <SidebarNavBlock title="Users" icon={UsersIcon} items={userNavItems} />
     </div>
   )
 }
-const defaultRoute = "general"
 
 export function SidebarNavBlock({
   className,
@@ -50,7 +89,6 @@ export function SidebarNavBlock({
   ...props
 }: SidebarNavProps) {
   const pathname = usePathname()
-  const leafRoute = pathname.split("/").pop()
 
   return (
     <nav
@@ -70,8 +108,7 @@ export function SidebarNavBlock({
           href={item.href}
           className={cn(
             buttonVariants({ variant: "ghost" }),
-            item.href.endsWith(leafRoute ?? defaultRoute) &&
-              "bg-muted-foreground/10",
+            pathname === item.href && "bg-muted-foreground/10",
             "h-8 justify-start hover:cursor-default"
           )}
         >

@@ -1,19 +1,26 @@
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
-from fastapi.routing import APIRoute
 from httpx_oauth.clients.google import GoogleOAuth2
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from tracecat import config
-from tracecat.api.routers.users import router as users_router
-from tracecat.auth.constants import AuthType
+from tracecat.api.common import (
+    bootstrap_role,
+    custom_generate_unique_id,
+    generic_exception_handler,
+    tracecat_exception_handler,
+)
+from tracecat.auth.dependencies import require_auth_type_enabled
+from tracecat.auth.enums import AuthType
 from tracecat.auth.models import UserCreate, UserRead, UserUpdate
+from tracecat.auth.router import router as users_router
+from tracecat.auth.saml import router as saml_router
 from tracecat.auth.users import (
     FastAPIUsersException,
     InvalidDomainException,
@@ -21,99 +28,50 @@ from tracecat.auth.users import (
     fastapi_users,
 )
 from tracecat.contexts import ctx_role
+from tracecat.db.dependencies import AsyncDBSession
 from tracecat.db.engine import get_async_session_context_manager
+from tracecat.editor.router import router as editor_router
 from tracecat.logger import logger
 from tracecat.middleware import RequestLoggingMiddleware
+from tracecat.middleware.security import SecurityHeadersMiddleware
+from tracecat.organization.router import router as org_router
 from tracecat.registry.actions.router import router as registry_actions_router
-from tracecat.registry.actions.service import RegistryActionsService
-from tracecat.registry.constants import (
-    CUSTOM_REPOSITORY_ORIGIN,
-    DEFAULT_REGISTRY_ORIGIN,
-)
-from tracecat.registry.repositories.models import RegistryRepositoryCreate
+from tracecat.registry.common import reload_registry
 from tracecat.registry.repositories.router import router as registry_repos_router
-from tracecat.registry.repositories.service import RegistryReposService
-from tracecat.registry.repository import safe_url
+from tracecat.secrets.router import org_router as org_secrets_router
 from tracecat.secrets.router import router as secrets_router
-from tracecat.types.auth import AccessLevel, Role
+from tracecat.settings.router import router as org_settings_router
+from tracecat.settings.service import SettingsService, get_setting_override
+from tracecat.tags.router import router as tags_router
+from tracecat.types.auth import Role
 from tracecat.types.exceptions import TracecatException
 from tracecat.webhooks.router import router as webhook_router
 from tracecat.workflow.actions.router import router as workflow_actions_router
 from tracecat.workflow.executions.router import router as workflow_executions_router
 from tracecat.workflow.management.router import router as workflow_management_router
 from tracecat.workflow.schedules.router import router as schedules_router
+from tracecat.workflow.tags.router import router as workflow_tags_router
 from tracecat.workspaces.router import router as workspaces_router
 from tracecat.workspaces.service import WorkspaceService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    admin_role = Role(
-        type="service",
-        access_level=AccessLevel.ADMIN,
-        service_id="tracecat-api",
-    )
+    role = bootstrap_role()
     async with get_async_session_context_manager() as session:
-        await setup_defaults(session, admin_role)
-        await setup_registry(session, admin_role)
-    await setup_oss_models()
+        # Org
+        await setup_org_settings(session, role)
+        await reload_registry(session, role)
+        await setup_workspace_defaults(session, role)
     yield
 
 
-async def setup_registry(session: AsyncSession, admin_role: Role):
-    logger.info("Setting up base registry repository")
-    repos_service = RegistryReposService(session, role=admin_role)
-    # Setup Tracecat base repository
-    base_origin = DEFAULT_REGISTRY_ORIGIN
-    # Check if the base registry repository already exists
-    # NOTE: Should we sync the base repo every time?
-    if await repos_service.get_repository(base_origin) is None:
-        base_repo = await repos_service.create_repository(
-            RegistryRepositoryCreate(origin=base_origin)
-        )
-        logger.info("Created base registry repository", origin=base_origin)
-        actions_service = RegistryActionsService(session, role=admin_role)
-        await actions_service.sync_actions_from_repository(base_repo)
-    else:
-        logger.info("Base registry repository already exists", origin=base_origin)
-
-    # Setup custom repository
-    custom_origin = CUSTOM_REPOSITORY_ORIGIN
-    if await repos_service.get_repository(custom_origin) is None:
-        await repos_service.create_repository(
-            RegistryRepositoryCreate(origin=custom_origin)
-        )
-        logger.info("Created custom repository", origin=custom_origin)
-    else:
-        logger.info("Custom repository already exists", origin=custom_origin)
-
-    # Setup custom remote repository
-    if (remote_url := config.TRACECAT__REMOTE_REPOSITORY_URL) is not None:
-        parsed_url = urlparse(remote_url)
-        logger.info("Setting up remote registry repository", url=parsed_url)
-        # Create it if it doesn't exist
-
-        cleaned_url = safe_url(remote_url)
-        if await repos_service.get_repository(cleaned_url) is None:
-            await repos_service.create_repository(
-                RegistryRepositoryCreate(origin=cleaned_url)
-            )
-            logger.info("Created remote registry repository", url=cleaned_url)
-        else:
-            logger.info("Remote registry repository already exists", url=cleaned_url)
-        # Load remote repository
-    else:
-        logger.info("Remote registry repository not set, skipping")
-
-    repos = await repos_service.list_repositories()
-    logger.info(
-        "Found registry repositories",
-        n=len(repos),
-        repos=[repo.origin for repo in repos],
-    )
+async def setup_org_settings(session: AsyncSession, admin_role: Role):
+    settings_service = SettingsService(session, role=admin_role)
+    await settings_service.init_default_settings()
 
 
-async def setup_defaults(session: AsyncSession, admin_role: Role):
+async def setup_workspace_defaults(session: AsyncSession, admin_role: Role):
     ws_service = WorkspaceService(session, role=admin_role)
     workspaces = await ws_service.admin_list_workspaces()
     n_workspaces = len(workspaces)
@@ -127,64 +85,17 @@ async def setup_defaults(session: AsyncSession, admin_role: Role):
             logger.info("Default workspace already exists, skipping")
 
 
-async def setup_oss_models():
-    if not (preload_models := config.TRACECAT__PRELOAD_OSS_MODELS):
-        return
-    from tracecat.llm import preload_ollama_models
-
-    logger.info(
-        f"Preloading {len(preload_models)} models",
-        models=preload_models,
-    )
-    await preload_ollama_models(preload_models)
-    logger.info("Preloaded models", models=preload_models)
-
-
-def custom_generate_unique_id(route: APIRoute):
-    if route.tags:
-        return f"{route.tags[0]}-{route.name}"
-    return route.name
-
-
 # Catch-all exception handler to prevent stack traces from leaking
-def generic_exception_handler(request: Request, exc: Exception):
-    logger.error(
-        "Unexpected error",
-        exc=exc,
-        role=ctx_role.get(),
-        params=request.query_params,
-        path=request.url.path,
-    )
-    return ORJSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"message": "An unexpected error occurred. Please try again later."},
-    )
-
-
-def tracecat_exception_handler(request: Request, exc: TracecatException):
-    """Generic exception handler for Tracecat exceptions.
-
-    We can customize exceptions to expose only what should be user facing.
-    """
-    msg = str(exc)
-    logger.error(
-        msg,
-        role=ctx_role.get(),
-        params=request.query_params,
-        path=request.url.path,
-    )
-    return ORJSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"type": type(exc).__name__, "message": msg, "detail": exc.detail},
-    )
-
-
 def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Improves visiblity of 422 errors."""
-    exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
-    logger.error(f"{request}: {exc_str}")
+    errors = exc.errors()
+    logger.error(
+        "API Model Validation error",
+        request=request,
+        errors=errors,
+    )
     return ORJSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content=exc_str
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": errors}
     )
 
 
@@ -206,7 +117,6 @@ def fastapi_users_auth_exception_handler(request: Request, exc: FastAPIUsersExce
 
 
 def create_app(**kwargs) -> FastAPI:
-    global logger
     if config.TRACECAT__ALLOW_ORIGINS is not None:
         allow_origins = config.TRACECAT__ALLOW_ORIGINS.split(",")
     else:
@@ -238,7 +148,7 @@ def create_app(**kwargs) -> FastAPI:
         root_path=config.TRACECAT__API_ROOT_PATH,
         **kwargs,
     )
-    app.logger = logger
+    app.logger = logger  # type: ignore
 
     # Routers
     app.include_router(webhook_router)
@@ -246,11 +156,17 @@ def create_app(**kwargs) -> FastAPI:
     app.include_router(workflow_management_router)
     app.include_router(workflow_executions_router)
     app.include_router(workflow_actions_router)
+    app.include_router(workflow_tags_router)
     app.include_router(secrets_router)
     app.include_router(schedules_router)
+    app.include_router(tags_router)
     app.include_router(users_router)
+    app.include_router(org_router)
+    app.include_router(editor_router)
     app.include_router(registry_repos_router)
     app.include_router(registry_actions_router)
+    app.include_router(org_settings_router)
+    app.include_router(org_secrets_router)
     app.include_router(
         fastapi_users.get_users_router(UserRead, UserUpdate),
         prefix="/users",
@@ -279,57 +195,52 @@ def create_app(**kwargs) -> FastAPI:
             tags=["auth"],
         )
 
-    if AuthType.GOOGLE_OAUTH in config.TRACECAT__AUTH_TYPES:
-        oauth_client = GoogleOAuth2(
-            client_id=config.OAUTH_CLIENT_ID, client_secret=config.OAUTH_CLIENT_SECRET
-        )
-        # This is the frontend URL that the user will be redirected to after authenticating
-        redirect_url = f"{config.TRACECAT__PUBLIC_APP_URL}/auth/oauth/callback"
-        logger.info("OAuth redirect URL", url=redirect_url)
-        app.include_router(
-            fastapi_users.get_oauth_router(
-                oauth_client,
-                auth_backend,
-                config.USER_AUTH_SECRET,
-                # XXX(security): See https://fastapi-users.github.io/fastapi-users/13.0/configuration/oauth/#existing-account-association
-                associate_by_email=True,
-                is_verified_by_default=True,
-                # Points the user back to the login page
-                redirect_url=redirect_url,
-            ),
-            prefix="/auth/oauth",
-            tags=["auth"],
-        )
+    oauth_client = GoogleOAuth2(
+        client_id=config.OAUTH_CLIENT_ID, client_secret=config.OAUTH_CLIENT_SECRET
+    )
+    # This is the frontend URL that the user will be redirected to after authenticating
+    redirect_url = f"{config.TRACECAT__PUBLIC_APP_URL}/auth/oauth/callback"
+    logger.info("OAuth redirect URL", url=redirect_url)
+    app.include_router(
+        fastapi_users.get_oauth_router(
+            oauth_client,
+            auth_backend,
+            config.USER_AUTH_SECRET,
+            # XXX(security): See https://fastapi-users.github.io/fastapi-users/13.0/configuration/oauth/#existing-account-association
+            associate_by_email=True,
+            is_verified_by_default=True,
+            # Points the user back to the login page
+            redirect_url=redirect_url,
+        ),
+        prefix="/auth/oauth",
+        tags=["auth"],
+        dependencies=[require_auth_type_enabled(AuthType.GOOGLE_OAUTH)],
+    )
+    app.include_router(
+        saml_router,
+        dependencies=[require_auth_type_enabled(AuthType.SAML)],
+    )
+
+    if AuthType.BASIC not in config.TRACECAT__AUTH_TYPES:
         # Need basic auth router for `logout` endpoint
         app.include_router(
             fastapi_users.get_logout_router(auth_backend),
             prefix="/auth",
             tags=["auth"],
         )
-    if AuthType.SAML in config.TRACECAT__AUTH_TYPES:
-        from tracecat.auth.saml import router as saml_router
-
-        logger.info("SAML auth type enabled")
-        app.include_router(saml_router)
-
-    # Development endpoints
-    if config.TRACECAT__APP_ENV == "development":
-        # XXX(security): This is a security risk. Do not run this in production.
-        from tracecat.testing.registry import router as registry_testing_router
-
-        app.include_router(registry_testing_router)
-        logger.warning("Development endpoints enabled. Do not run this in production.")
 
     # Exception handlers
     app.add_exception_handler(Exception, generic_exception_handler)
-    app.add_exception_handler(TracecatException, tracecat_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(TracecatException, tracecat_exception_handler)  # type: ignore  # type: ignore
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore
     app.add_exception_handler(
-        FastAPIUsersException, fastapi_users_auth_exception_handler
+        FastAPIUsersException,
+        fastapi_users_auth_exception_handler,  # type: ignore
     )
 
     # Middleware
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
@@ -353,6 +264,34 @@ app = create_app()
 @app.get("/", include_in_schema=False)
 def root() -> dict[str, str]:
     return {"message": "Hello world. I am the API."}
+
+
+class AppInfo(BaseModel):
+    public_app_url: str
+    auth_allowed_types: list[AuthType]
+    auth_basic_enabled: bool
+    oauth_google_enabled: bool
+    saml_enabled: bool
+
+
+@app.get("/info", include_in_schema=False)
+async def info(session: AsyncDBSession) -> AppInfo:
+    """Non-sensitive information about the platform, for frontend configuration."""
+
+    keys = {"auth_basic_enabled", "oauth_google_enabled", "saml_enabled"}
+
+    service = SettingsService(session, role=bootstrap_role())
+    settings = await service.list_org_settings(keys=keys)
+    keyvalues = {s.key: service.get_value(s) for s in settings}
+    for key in keys:
+        keyvalues[key] = get_setting_override(key) or keyvalues[key]
+    return AppInfo(
+        public_app_url=config.TRACECAT__PUBLIC_APP_URL,
+        auth_allowed_types=list(config.TRACECAT__AUTH_TYPES),
+        auth_basic_enabled=keyvalues["auth_basic_enabled"],
+        oauth_google_enabled=keyvalues["oauth_google_enabled"],
+        saml_enabled=keyvalues["saml_enabled"],
+    )
 
 
 @app.get("/health", tags=["public"])

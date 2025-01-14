@@ -11,36 +11,39 @@ from pydantic import Field
 
 from tracecat_registry import RegistrySecret, logger, registry, secrets
 
-# TODO: Support possible sets of secrets
-# e.g. AWS_PROFILE_NAME or AWS_ROLE_ARN
 aws_secret = RegistrySecret(
     name="aws",
-    keys=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
+    optional_keys=[
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION",
+        "AWS_PROFILE_NAME",
+        "AWS_ROLE_ARN",
+        "AWS_ROLE_SESSION_NAME",
+    ],
 )
 """AWS secret.
 
 Secret
 ------
 - name: `aws`
-- keys:
-    - `AWS_ACCESS_KEY_ID`
-    - `AWS_SECRET_ACCESS_KEY`
-    - `AWS_REGION`
-
-Example Usage
--------------
-Environment variables:
->>> secrets.get["AWS_ACCESS_KEY_ID"]
-
-Expression:
->>> ${{ SECRETS.aws.AWS_ACCESS_KEY_ID }}
+- optional_keys:
+    Either:
+        - `AWS_ACCESS_KEY_ID`
+        - `AWS_SECRET_ACCESS_KEY`
+        - `AWS_REGION`
+    Or:
+        - `AWS_PROFILE_NAME`
+    Or:
+        - `AWS_ROLE_ARN`
+        - `AWS_ROLE_SESSION_NAME`
 """
 
 
 async def get_temporary_credentials(
     role_arn: str,
     role_session_name: str | None = None,
-):
+) -> dict[str, Any]:
     async with aioboto3.Session().client("sts") as sts_client:
         # Assume the cross-account role
         response = await sts_client.assume_role(
@@ -106,7 +109,7 @@ async def call_boto3_client(
 ) -> dict[str, Any]:
     params = params or {}
     session = await get_session()
-    async with session.client(service_name) as client:
+    async with session.client(service_name) as client:  # type: ignore
         response = await getattr(client, method_name)(**params)
         return response
 
@@ -126,7 +129,7 @@ async def call_boto3_paginator(
             description="AWS service name to create Boto3 Paginator, e.g. 's3', 'ec2', 'guardduty'.",
         ),
     ],
-    paginator: Annotated[
+    method_name: Annotated[
         str,
         Field(
             ...,
@@ -140,8 +143,8 @@ async def call_boto3_paginator(
 ) -> list[dict[str, Any]]:
     params = params or {}
     session = await get_session()
-    async with session.client(service_name) as client:
-        paginator = client.get_paginator(paginator)
+    async with session.client(service_name) as client:  # type: ignore
+        paginator = client.get_paginator(method_name)
         pages = paginator.paginate(**params)
 
     results = []

@@ -7,9 +7,11 @@ import itertools
 import json
 import math
 import re
+import urllib.parse
 import zoneinfo
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from functools import wraps
 from html.parser import HTMLParser
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
@@ -21,7 +23,7 @@ import jsonpath_ng.ext
 import orjson
 from jsonpath_ng.exceptions import JsonPathParserError
 
-from tracecat.expressions.shared import ExprContext
+from tracecat.expressions.common import ExprContext
 from tracecat.expressions.validation import is_iterable
 from tracecat.logger import logger
 from tracecat.types.exceptions import TracecatExpressionError
@@ -89,6 +91,11 @@ def _bool(x: Any) -> bool:
 # String functions
 
 
+def url_encode(x: str) -> str:
+    """Converts URL-unsafe characters into percent-encoded characters."""
+    return urllib.parse.quote(x)
+
+
 def from_timestamp(x: int, unit: str) -> datetime:
     """Convert timestamp to datetime, handling milliseconds if unit is 'ms'."""
     if unit == "ms":
@@ -119,6 +126,20 @@ def to_datetime(x: Any, timezone: str | None = None) -> datetime:
         dt = dt.astimezone(tzinfo)
 
     return dt
+
+
+def add_prefix(x: str | list[str], prefix: str) -> str | list[str]:
+    """Add a prefix to a string or list of strings."""
+    if is_iterable(x, container_only=True):
+        return [f"{prefix}{item}" for item in x]
+    return f"{prefix}{x}"
+
+
+def add_suffix(x: str | list[str], suffix: str) -> str | list[str]:
+    """Add a suffix to a string or list of strings."""
+    if is_iterable(x, container_only=True):
+        return [f"{item}{suffix}" for item in x]
+    return f"{x}{suffix}"
 
 
 def format_string(template: str, *values: Any) -> str:
@@ -189,6 +210,11 @@ def str_to_b64url(x: str) -> str:
 def b64url_to_str(x: str) -> str:
     """Decode URL-safe base64 string to string."""
     return base64.urlsafe_b64decode(x).decode()
+
+
+def replace(x: str, old: str, new: str) -> str:
+    """Replace all occurrences of old substring with new substring."""
+    return x.replace(old, new)
 
 
 def regex_extract(pattern: str, text: str) -> str | None:
@@ -383,6 +409,11 @@ def iter_product(*iterables: Sequence[Any]) -> list[tuple[Any, ...]]:
     return list(itertools.product(*iterables))
 
 
+def create_range(start: int, end: int, step: int = 1) -> range:
+    """Create a range of integers from start to end (exclusive), with a step size."""
+    return range(start, end, step)
+
+
 # Dictionary functions
 
 
@@ -417,6 +448,18 @@ def prettify_json_str(x: Any) -> str:
 def to_timestamp_str(x: datetime) -> float:
     """Convert datetime to timestamp."""
     return x.timestamp()
+
+
+def create_datetime(
+    year: int,
+    month: int,
+    day: int,
+    hour: int = 0,
+    minute: int = 0,
+    second: int = 0,
+) -> datetime:
+    """Create datetime from year, month, day, hour, minute, and second."""
+    return datetime(year, month, day, hour, minute, second)
 
 
 def get_second(x: datetime) -> int:
@@ -600,6 +643,22 @@ def unset_timezone(x: datetime) -> datetime:
     return x.replace(tzinfo=None)
 
 
+def windows_filetime(x: datetime) -> int:
+    """Convert datetime to Windows filetime."""
+    # Define Windows and Unix epochs
+    windows_epoch = datetime(1601, 1, 1, tzinfo=UTC)
+
+    # Ensure input datetime is UTC
+    if x.tzinfo is None:
+        x = x.replace(tzinfo=UTC)
+    elif x.tzinfo != UTC:
+        x = x.astimezone(UTC)
+
+    # Calculate number of 100-nanosecond intervals since Windows epoch
+    delta = x - windows_epoch
+    return int(delta.total_seconds() * 10_000_000)
+
+
 # Comparison functions
 
 
@@ -679,6 +738,11 @@ def union[T: Any](*collections: Sequence[T]) -> list[T]:
     return list(set().union(*collections))
 
 
+def difference[T: Any](a: Sequence[T], b: Sequence[T]) -> list[T]:
+    """Return the set difference of two sequences as a list."""
+    return list(set(a) - set(b))
+
+
 def apply[T: Any](item: T | Iterable[T], python_lambda: str) -> T | list[T]:
     """Apply a Python lambda function to an item or sequence of items."""
     fn = _build_safe_lambda(python_lambda)
@@ -695,7 +759,7 @@ def filter_[T: Any](items: Sequence[T], python_lambda: str) -> list[T]:
 
 def eval_jsonpath(
     expr: str,
-    operand: Mapping[str, Any],
+    operand: Mapping[str | StrEnum, Any],
     *,
     context_type: ExprContext | None = None,
     strict: bool = False,
@@ -741,6 +805,8 @@ def eval_jsonpath(
 
 _FUNCTION_MAPPING = {
     # String transforms
+    "prefix": add_prefix,
+    "suffix": add_suffix,
     "capitalize": capitalize,
     "endswith": endswith,
     "lowercase": lowercase,
@@ -750,6 +816,8 @@ _FUNCTION_MAPPING = {
     "strip": strip,
     "titleize": titleize,
     "uppercase": uppercase,
+    "replace": replace,
+    "url_encode": url_encode,
     # Comparison
     "less_than": less_than,
     "less_than_or_equal": less_than_or_equal,
@@ -774,6 +842,7 @@ _FUNCTION_MAPPING = {
     # Set operations
     "intersect": intersect,
     "union": union,
+    "difference": difference,
     # Math
     "add": add,
     "sub": sub,
@@ -791,6 +860,7 @@ _FUNCTION_MAPPING = {
     # Iteration
     "zip": zip_iterables,
     "iter_product": iter_product,
+    "range": create_range,
     # Generators
     "uuid4": generate_uuid,
     # Extract JSON keys and values
@@ -815,6 +885,7 @@ _FUNCTION_MAPPING = {
     "get_day_of_week": get_day_of_week,
     "get_month": get_month,
     "get_year": get_year,
+    "datetime": create_datetime,
     "seconds": create_seconds,
     "minutes": create_minutes,
     "hours": create_hours,
@@ -834,6 +905,7 @@ _FUNCTION_MAPPING = {
     "to_datetime": to_datetime,
     "to_isoformat": to_iso_format,
     "to_timestamp": to_timestamp_str,
+    "windows_filetime": windows_filetime,
     # Base64
     "to_base64": str_to_b64,
     "from_base64": b64_to_str,
@@ -887,7 +959,7 @@ def mappable(func: F) -> F:
         zipped_args = zip(*iterables, strict=False)
         return [func(*zipped) for zipped in zipped_args]
 
-    wrapper.map = broadcast_map
+    wrapper.map = broadcast_map  # type: ignore
     wrapper.__doc__ = func.__doc__
     return wrapper
 

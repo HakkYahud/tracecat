@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -8,6 +9,8 @@ from tracecat.expressions.functions import (
     _bool,
     _build_safe_lambda,
     add,
+    add_prefix,
+    add_suffix,
     and_,
     b64_to_str,
     b64url_to_str,
@@ -18,6 +21,7 @@ from tracecat.expressions.functions import (
     create_days,
     create_hours,
     create_minutes,
+    create_range,
     create_seconds,
     create_weeks,
     days_between,
@@ -25,6 +29,7 @@ from tracecat.expressions.functions import (
     dict_keys,
     dict_lookup,
     dict_values,
+    difference,
     div,
     does_not_contain,
     endswith,
@@ -87,9 +92,36 @@ from tracecat.expressions.functions import (
     union,
     unset_timezone,
     uppercase,
+    url_encode,
     weeks_between,
     zip_iterables,
 )
+
+
+@pytest.mark.parametrize(
+    "input,prefix,expected",
+    [
+        ("test", "prefix", "prefixtest"),
+        (["hello", "world"], "prefix", ["prefixhello", "prefixworld"]),
+    ],
+)
+def test_add_prefix(
+    input: str | list[str], prefix: str, expected: str | list[str]
+) -> None:
+    assert add_prefix(input, prefix) == expected
+
+
+@pytest.mark.parametrize(
+    "input,suffix,expected",
+    [
+        ("test", "suffix", "testsuffix"),
+        (["hello", "world"], "suffix", ["hellosuffix", "worldsuffix"]),
+    ],
+)
+def test_add_suffix(
+    input: str | list[str], suffix: str, expected: str | list[str]
+) -> None:
+    assert add_suffix(input, suffix) == expected
 
 
 @pytest.mark.parametrize(
@@ -716,9 +748,9 @@ def test_set_timezone(
     assert offset is not None
     offset_hours = offset.total_seconds() / 3600
     min_offset, max_offset = expected_range
-    assert (
-        min_offset <= offset_hours <= max_offset
-    ), f"Offset {offset_hours} not in expected range [{min_offset}, {max_offset}]"
+    assert min_offset <= offset_hours <= max_offset, (
+        f"Offset {offset_hours} not in expected range [{min_offset}, {max_offset}]"
+    )
 
 
 @pytest.mark.parametrize(
@@ -730,6 +762,17 @@ def test_set_timezone(
 )
 def test_unset_timezone(dt: datetime) -> None:
     assert unset_timezone(dt) == dt.replace(tzinfo=None)
+
+
+@pytest.mark.parametrize(
+    "input_str,expected",
+    [
+        ("admin+tracecat1@gmail.com", "admin%2Btracecat1%40gmail.com"),
+        ("admin+tracecat1-org@gmail.com", "admin%2Btracecat1-org%40gmail.com"),
+    ],
+)
+def test_url_encode(input_str: str, expected: str) -> None:
+    assert url_encode(input_str) == expected
 
 
 @pytest.mark.parametrize(
@@ -841,3 +884,48 @@ def test_intersect(
     result = intersect(items, collection, python_lambda)
     # Sort the results to ensure consistent comparison
     assert sorted(result) == sorted(expected)
+
+
+@pytest.mark.parametrize(
+    "start,end,step,expected",
+    [
+        (0, 5, 1, [0, 1, 2, 3, 4]),  # Basic range
+        (1, 10, 2, [1, 3, 5, 7, 9]),  # Range with step
+        (5, 0, -1, [5, 4, 3, 2, 1]),  # Descending range
+        (0, 0, 1, []),  # Empty range
+        (-5, 5, 2, [-5, -3, -1, 1, 3]),  # Range with negative start
+        (10, 5, -2, [10, 8, 6]),  # Descending range with step
+    ],
+)
+def test_create_range(start: int, end: int, step: int, expected: list[int]) -> None:
+    """Test create_range function with various inputs.
+
+    Tests:
+    - Basic ascending range
+    - Range with custom step size
+    - Descending range
+    - Empty range
+    - Range with negative numbers
+    - Descending range with custom step
+    """
+    result = create_range(start, end, step)
+    assert list(result) == expected
+
+    # Test invalid step
+    with pytest.raises(ValueError):
+        create_range(0, 5, 0)  # Step cannot be 0
+
+
+@pytest.mark.parametrize(
+    "a,b,expected",
+    [
+        ([1, 2, 3], [2, 3, 4], [1]),  # Basic difference
+        ([1, 2, 2], [2], [1]),  # Duplicates in first sequence
+        ([], [1, 2], []),  # Empty first sequence
+        ([1, 2], [], [1, 2]),  # Empty second sequence
+        (["a", "b"], ["b", "c"], ["a"]),  # String elements
+    ],
+)
+def test_difference(a: Sequence[Any], b: Sequence[Any], expected: list[Any]) -> None:
+    """Test set difference between two sequences."""
+    assert sorted(difference(a, b)) == sorted(expected)

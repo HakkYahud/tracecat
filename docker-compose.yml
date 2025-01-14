@@ -14,7 +14,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
 
   api:
-    image: ghcr.io/tracecathq/tracecat:${TRACECAT__IMAGE_TAG:-0.14.5}
+    image: ghcr.io/tracecathq/tracecat:${TRACECAT__IMAGE_TAG:-0.20.2}
     container_name: api
     restart: unless-stopped
     networks:
@@ -30,7 +30,7 @@ services:
       TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
       TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
       TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
-      TRACECAT__PUBLIC_RUNNER_URL: ${TRACECAT__PUBLIC_RUNNER_URL}
+      TRACECAT__PUBLIC_API_URL: ${TRACECAT__PUBLIC_API_URL}
       TRACECAT__PUBLIC_APP_URL: ${TRACECAT__PUBLIC_APP_URL}
       TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
       TRACECAT__SIGNING_SECRET: ${TRACECAT__SIGNING_SECRET} # Sensitive
@@ -38,20 +38,20 @@ services:
       TRACECAT__AUTH_TYPES: ${TRACECAT__AUTH_TYPES}
       TRACECAT__AUTH_ALLOWED_DOMAINS: ${TRACECAT__AUTH_ALLOWED_DOMAINS}
       TRACECAT__AUTH_MIN_PASSWORD_LENGTH: ${TRACECAT__AUTH_MIN_PASSWORD_LENGTH}
+      TRACECAT__EXECUTOR_URL: ${INTERNAL_EXECUTOR_URL}
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       USER_AUTH_SECRET: ${USER_AUTH_SECRET}
       RUN_MIGRATIONS: "true"
       # SAML SSO
-      SAML_IDP_ENTITY_ID: ${SAML_IDP_ENTITY_ID}
-      SAML_IDP_REDIRECT_URL: ${SAML_IDP_REDIRECT_URL}
-      SAML_IDP_CERTIFICATE: ${SAML_IDP_CERTIFICATE}
       SAML_IDP_METADATA_URL: ${SAML_IDP_METADATA_URL}
       SAML_SP_ACS_URL: ${SAML_SP_ACS_URL}
       # Temporal
       TEMPORAL__CLUSTER_URL: ${TEMPORAL__CLUSTER_URL}
       TEMPORAL__CLUSTER_QUEUE: ${TEMPORAL__CLUSTER_QUEUE}
+      TEMPORAL__TASK_TIMEOUT: ${TEMPORAL__TASK_TIMEOUT}
       # Remote registry
+      TRACECAT__ALLOWED_GIT_DOMAINS: ${TRACECAT__ALLOWED_GIT_DOMAINS}
       TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME: ${TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME}
       TRACECAT__REMOTE_REPOSITORY_URL: ${TRACECAT__REMOTE_REPOSITORY_URL}
       # AI
@@ -59,7 +59,7 @@ services:
       OLLAMA__API_URL: ${OLLAMA__API_URL}
 
   worker:
-    image: ghcr.io/tracecathq/tracecat:${TRACECAT__IMAGE_TAG:-0.14.5}
+    image: ghcr.io/tracecathq/tracecat:${TRACECAT__IMAGE_TAG:-0.20.2}
     restart: unless-stopped
     networks:
       - core
@@ -67,23 +67,58 @@ services:
       - temporal
     environment:
       LOG_LEVEL: ${LOG_LEVEL}
-      TRACECAT__API_URL: ${TRACECAT__API_URL}
       TRACECAT__API_ROOT_PATH: ${TRACECAT__API_ROOT_PATH}
+      TRACECAT__API_URL: ${TRACECAT__API_URL}
       TRACECAT__APP_ENV: ${TRACECAT__APP_ENV}
       TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
       TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
       TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
-      TRACECAT__PUBLIC_RUNNER_URL: ${TRACECAT__PUBLIC_RUNNER_URL}
+      TRACECAT__PUBLIC_API_URL: ${TRACECAT__PUBLIC_API_URL}
+      TRACECAT__EXECUTOR_URL: ${INTERNAL_EXECUTOR_URL}
       TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
       TRACECAT__SIGNING_SECRET: ${TRACECAT__SIGNING_SECRET} # Sensitive
       # Temporal
       TEMPORAL__CLUSTER_URL: ${TEMPORAL__CLUSTER_URL}
       TEMPORAL__CLUSTER_QUEUE: ${TEMPORAL__CLUSTER_QUEUE}
-
     command: ["python", "tracecat/dsl/worker.py"]
 
+  executor:
+    image: ghcr.io/tracecathq/tracecat:${TRACECAT__IMAGE_TAG:-0.20.2}
+    restart: unless-stopped
+    networks:
+      - core
+      - core-db
+    environment:
+      # Common
+      LOG_LEVEL: ${LOG_LEVEL}
+      TRACECAT__APP_ENV: ${TRACECAT__APP_ENV}
+      TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
+      TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
+      TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
+      TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
+      # Remote registry
+      TRACECAT__ALLOWED_GIT_DOMAINS: ${TRACECAT__ALLOWED_GIT_DOMAINS}
+      TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME: ${TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME}
+      TRACECAT__REMOTE_REPOSITORY_URL: ${TRACECAT__REMOTE_REPOSITORY_URL}
+      # Email
+      TRACECAT__ALLOWED_EMAIL_ATTRIBUTES: ${TRACECAT__ALLOWED_EMAIL_ATTRIBUTES}
+      # AI
+      TRACECAT__PRELOAD_OSS_MODELS: ${TRACECAT__PRELOAD_OSS_MODELS}
+      OLLAMA__API_URL: ${OLLAMA__API_URL}
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "tracecat.api.executor:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
+
   ui:
-    image: ghcr.io/tracecathq/tracecat-ui:${TRACECAT__IMAGE_TAG:-0.14.5}
+    image: ghcr.io/tracecathq/tracecat-ui:${TRACECAT__IMAGE_TAG:-0.20.2}
     container_name: ui
     restart: unless-stopped
     networks:
@@ -140,19 +175,9 @@ services:
     depends_on:
       - temporal_postgres_db
 
-  ollama:
-    container_name: ollama
-    tty: true
-    restart: unless-stopped
-    image: ollama/ollama:${OLLAMA__VERSION}
-    ports:
-      - 11434:11434
-    volumes:
-      - ollama:/root/.ollama
 volumes:
   core-db:
   temporal-db:
-  ollama:
 
 networks:
   core:

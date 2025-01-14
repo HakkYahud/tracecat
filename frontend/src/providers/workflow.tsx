@@ -12,13 +12,13 @@ import React, {
 import { useParams } from "next/navigation"
 import {
   ApiError,
-  CommitWorkflowResponse,
   RegistryActionValidateResponse,
-  UpdateWorkflowParams,
-  WorkflowResponse,
+  WorkflowCommitResponse,
+  WorkflowRead,
   workflowsCommitWorkflow,
   workflowsGetWorkflow,
   workflowsUpdateWorkflow,
+  WorkflowUpdate,
 } from "@/client"
 import {
   MutateFunction,
@@ -30,7 +30,7 @@ import {
 import { toast } from "@/components/ui/use-toast"
 
 type WorkflowContextType = {
-  workflow: WorkflowResponse | null
+  workflow: WorkflowRead | null
   workspaceId: string
   workflowId: string | null
   isLoading: boolean
@@ -38,12 +38,12 @@ type WorkflowContextType = {
   isOnline: boolean
   setIsOnline: (isOnline: boolean) => void
   commitWorkflow: MutateFunction<
-    CommitWorkflowResponse,
+    WorkflowCommitResponse,
     ApiError,
     void,
     unknown
   >
-  updateWorkflow: MutateFunction<void, ApiError, UpdateWorkflowParams, unknown>
+  updateWorkflow: MutateFunction<void, ApiError, WorkflowUpdate, unknown>
   validationErrors: RegistryActionValidateResponse[] | null
   setValidationErrors: React.Dispatch<
     SetStateAction<RegistryActionValidateResponse[] | null>
@@ -76,7 +76,7 @@ export function WorkflowProvider({
     data: workflow,
     isLoading,
     error,
-  } = useQuery<WorkflowResponse | null, ApiError>({
+  } = useQuery<WorkflowRead | null, ApiError>({
     queryKey: ["workflow", workflowId],
     queryFn: async ({ queryKey }) => {
       const wfId = queryKey[1] as string | null
@@ -102,8 +102,8 @@ export function WorkflowProvider({
       if (response.status === "success") {
         queryClient.invalidateQueries({ queryKey: ["workflow", workflowId] })
         toast({
-          title: "Commited changes to workflow",
-          description: "New workflow deployment created successfully.",
+          title: "Saved changes to workflow",
+          description: "New workflow version saved successfully.",
         })
       } else {
         toast({
@@ -112,9 +112,9 @@ export function WorkflowProvider({
             <div className="flex flex-col space-y-2">
               <p>
                 {response.message ||
-                  "Could not commit workflow due to valiation errors"}
+                  "Could not save workflow due to validation errors."}
               </p>
-              <p>Please hover over the commit button to view errors.</p>
+              <p>Please hover over the save button to view errors.</p>
             </div>
           ),
           variant: "destructive",
@@ -122,19 +122,19 @@ export function WorkflowProvider({
       }
     },
     onError: (error: ApiError) => {
-      console.warn("Failed to commit workflow:", error)
+      console.warn("Failed to save workflow:", error)
       toast({
-        title: "Error commiting workflow",
+        title: "Error saving workflow",
         description:
           (error.body as TracecatErrorMessage).message ||
-          "Could not commit workflow. Please try again.",
+          "Could not save workflow. Please try again.",
         variant: "destructive",
       })
     },
   })
 
   const { mutateAsync: updateWorkflow } = useMutation({
-    mutationFn: async (values: UpdateWorkflowParams) =>
+    mutationFn: async (values: WorkflowUpdate) =>
       await workflowsUpdateWorkflow({
         workspaceId,
         workflowId,

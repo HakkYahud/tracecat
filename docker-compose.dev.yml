@@ -28,7 +28,7 @@ services:
       TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
       TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
       TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
-      TRACECAT__PUBLIC_RUNNER_URL: ${TRACECAT__PUBLIC_RUNNER_URL}
+      TRACECAT__PUBLIC_API_URL: ${TRACECAT__PUBLIC_API_URL}
       TRACECAT__PUBLIC_APP_URL: ${TRACECAT__PUBLIC_APP_URL}
       TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
       TRACECAT__SIGNING_SECRET: ${TRACECAT__SIGNING_SECRET} # Sensitive
@@ -36,34 +36,33 @@ services:
       TRACECAT__AUTH_TYPES: ${TRACECAT__AUTH_TYPES}
       TRACECAT__AUTH_ALLOWED_DOMAINS: ${TRACECAT__AUTH_ALLOWED_DOMAINS}
       TRACECAT__AUTH_MIN_PASSWORD_LENGTH: ${TRACECAT__AUTH_MIN_PASSWORD_LENGTH}
+      TRACECAT__EXECUTOR_URL: ${INTERNAL_EXECUTOR_URL}
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       USER_AUTH_SECRET: ${USER_AUTH_SECRET}
       # SAML SSO
-      SAML_IDP_ENTITY_ID: ${SAML_IDP_ENTITY_ID}
-      SAML_IDP_REDIRECT_URL: ${SAML_IDP_REDIRECT_URL}
-      SAML_IDP_CERTIFICATE: ${SAML_IDP_CERTIFICATE}
       SAML_IDP_METADATA_URL: ${SAML_IDP_METADATA_URL}
       SAML_SP_ACS_URL: ${SAML_SP_ACS_URL}
       # Temporal
       TEMPORAL__CLUSTER_URL: ${TEMPORAL__CLUSTER_URL}
       TEMPORAL__CLUSTER_QUEUE: ${TEMPORAL__CLUSTER_QUEUE}
+      TEMPORAL__TASK_TIMEOUT: ${TEMPORAL__TASK_TIMEOUT}
       # Migrations
       RUN_MIGRATIONS: "true"
       # Remote registry
+      TRACECAT__ALLOWED_GIT_DOMAINS: ${TRACECAT__ALLOWED_GIT_DOMAINS}
       TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME: ${TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME}
       TRACECAT__REMOTE_REPOSITORY_URL: ${TRACECAT__REMOTE_REPOSITORY_URL}
       # AI
       TRACECAT__PRELOAD_OSS_MODELS: ${TRACECAT__PRELOAD_OSS_MODELS}
       OLLAMA__API_URL: ${OLLAMA__API_URL}
-      # This is only used for testing
-      TRACECAT__UNSAFE_DISABLE_SM_MASKING: ${TRACECAT__UNSAFE_DISABLE_SM_MASKING:-true}
     volumes:
       - ./tracecat:/app/tracecat
       - ./registry:/app/registry
       - ./alembic:/app/alembic
     depends_on:
       - ollama
+      - executor
 
   worker:
     build:
@@ -72,13 +71,14 @@ services:
     restart: unless-stopped
     environment:
       LOG_LEVEL: ${LOG_LEVEL}
-      TRACECAT__API_URL: ${TRACECAT__API_URL}
       TRACECAT__API_ROOT_PATH: ${TRACECAT__API_ROOT_PATH}
+      TRACECAT__API_URL: ${TRACECAT__API_URL}
       TRACECAT__APP_ENV: ${TRACECAT__APP_ENV}
       TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
       TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
       TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
-      TRACECAT__PUBLIC_RUNNER_URL: ${TRACECAT__PUBLIC_RUNNER_URL}
+      TRACECAT__PUBLIC_API_URL: ${TRACECAT__PUBLIC_API_URL}
+      TRACECAT__EXECUTOR_URL: ${INTERNAL_EXECUTOR_URL}
       TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
       TRACECAT__SIGNING_SECRET: ${TRACECAT__SIGNING_SECRET} # Sensitive
       # Temporal
@@ -87,7 +87,48 @@ services:
     volumes:
       - ./tracecat:/app/tracecat
       - ./registry:/app/registry
-    entrypoint: ["python", "tracecat/dsl/worker.py"]
+    command: ["python", "tracecat/dsl/worker.py"]
+
+  executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      # Common
+      LOG_LEVEL: ${LOG_LEVEL}
+      TRACECAT__APP_ENV: ${TRACECAT__APP_ENV}
+      TRACECAT__DB_ENCRYPTION_KEY: ${TRACECAT__DB_ENCRYPTION_KEY} # Sensitive
+      TRACECAT__DB_SSLMODE: ${TRACECAT__DB_SSLMODE}
+      TRACECAT__DB_URI: ${TRACECAT__DB_URI} # Sensitive
+      TRACECAT__SERVICE_KEY: ${TRACECAT__SERVICE_KEY} # Sensitive
+      TRACECAT__SIGNING_SECRET: ${TRACECAT__SIGNING_SECRET} # Sensitive
+      # Registry
+      TRACECAT__ALLOWED_GIT_DOMAINS: ${TRACECAT__ALLOWED_GIT_DOMAINS}
+      TRACECAT__REMOTE_REPOSITORY_URL: ${TRACECAT__REMOTE_REPOSITORY_URL}
+      TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME: ${TRACECAT__REMOTE_REPOSITORY_PACKAGE_NAME}
+      TRACECAT__UNSAFE_DISABLE_SM_MASKING: ${TRACECAT__UNSAFE_DISABLE_SM_MASKING:-false}
+      # Email
+      TRACECAT__ALLOWED_EMAIL_ATTRIBUTES: ${TRACECAT__ALLOWED_EMAIL_ATTRIBUTES}
+      # AI
+      TRACECAT__PRELOAD_OSS_MODELS: ${TRACECAT__PRELOAD_OSS_MODELS}
+      OLLAMA__API_URL: ${OLLAMA__API_URL}
+    volumes:
+      - ./tracecat:/app/tracecat
+    ports:
+      - 8001:8000
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "tracecat.api.executor:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
 
   ui:
     build:
@@ -115,6 +156,7 @@ services:
       - ./frontend/src:/app/src
       - ./frontend/.next:/app/.next
       - ./frontend/node_modules:/app/node_modules
+    attach: false
 
   postgres_db:
     image: postgres:16

@@ -1,56 +1,66 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+import re
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import and_, col, select
+from temporalio import activity
 
-from tracecat.contexts import ctx_role
-from tracecat.db.engine import get_async_session_context_manager
-from tracecat.db.schemas import Action, Webhook, Workflow
+from tracecat.db.schemas import Action, Tag, Webhook, Workflow, WorkflowTag
 from tracecat.dsl.common import DSLEntrypoint, DSLInput, build_action_statements
 from tracecat.dsl.models import DSLConfig
 from tracecat.dsl.view import RFGraph
 from tracecat.identifiers import WorkflowID
-from tracecat.logger import logger
+from tracecat.identifiers.workflow import WF_ID_PATTERN
 from tracecat.registry.actions.models import RegistryActionValidateResponse
-from tracecat.types.auth import Role
+from tracecat.service import BaseService
 from tracecat.types.exceptions import TracecatValidationError
 from tracecat.validation.service import validate_dsl
 from tracecat.workflow.actions.models import ActionControlFlow
 from tracecat.workflow.management.models import (
-    CreateWorkflowFromDSLResponse,
-    CreateWorkflowParams,
     ExternalWorkflowDefinition,
-    UpdateWorkflowParams,
+    GetErrorHandlerWorkflowIDActivityInputs,
+    ResolveWorkflowAliasActivityInputs,
+    WorkflowCreate,
+    WorkflowDSLCreateResponse,
+    WorkflowUpdate,
 )
 
 
-class WorkflowsManagementService:
+class WorkflowsManagementService(BaseService):
     """Manages CRUD operations for Workflows."""
 
-    def __init__(self, session: AsyncSession, role: Role | None = None):
-        self.role = role or ctx_role.get()
-        self.session = session
-        self.logger = logger.bind(service="workflows")
+    service_name = "workflows"
 
-    @asynccontextmanager
-    @staticmethod
-    async def with_session(
-        role: Role | None = None,
-    ) -> AsyncGenerator[WorkflowsManagementService, None]:
-        async with get_async_session_context_manager() as session:
-            yield WorkflowsManagementService(session, role=role)
+    async def list_workflows(
+        self, *, tags: list[str] | None = None
+    ) -> Sequence[Workflow]:
+        """List workflows.
 
-    async def list_workflows(self) -> Sequence[Workflow]:
-        """List workflows."""
+        Args:
+            tags: Optional list of tag names to filter workflows by
 
-        statement = select(Workflow).where(Workflow.owner_id == self.role.workspace_id)
-        results = await self.session.exec(statement)
+        Returns:
+            Sequence[Workflow]: List of workflows matching the filters
+        """
+        stmt = select(Workflow).where(Workflow.owner_id == self.role.workspace_id)
+
+        if tags:
+            tag_set = set(tags)
+            # Join through the WorkflowTag link table to Tag table
+            stmt = (
+                stmt.join(WorkflowTag, Workflow.id == WorkflowTag.workflow_id)  # type: ignore
+                .join(
+                    Tag, and_(Tag.id == WorkflowTag.tag_id, col(Tag.name).in_(tag_set))
+                )
+                # Ensure we get distinct workflows when multiple tags match
+                .distinct()
+            )
+
+        results = await self.session.exec(stmt)
         workflows = results.all()
         return workflows
 
@@ -61,8 +71,15 @@ class WorkflowsManagementService:
         result = await self.session.exec(statement)
         return result.one_or_none()
 
-    async def update_wrkflow(
-        self, workflow_id: WorkflowID, params: UpdateWorkflowParams
+    async def resolve_workflow_alias(self, alias: str) -> WorkflowID | None:
+        statement = select(Workflow.id).where(
+            Workflow.owner_id == self.role.workspace_id, Workflow.alias == alias
+        )
+        result = await self.session.exec(statement)
+        return result.one_or_none()
+
+    async def update_workflow(
+        self, workflow_id: WorkflowID, params: WorkflowUpdate
     ) -> Workflow:
         statement = select(Workflow).where(
             Workflow.owner_id == self.role.workspace_id,
@@ -88,7 +105,7 @@ class WorkflowsManagementService:
         await self.session.delete(workflow)
         await self.session.commit()
 
-    async def create_workflow(self, params: CreateWorkflowParams) -> Workflow:
+    async def create_workflow(self, params: WorkflowCreate) -> Workflow:
         """Create a new workflow."""
 
         now = datetime.now().strftime("%b %d, %Y, %H:%M:%S")
@@ -121,7 +138,7 @@ class WorkflowsManagementService:
 
     async def create_workflow_from_dsl(
         self, dsl_data: dict[str, Any], *, skip_secret_validation: bool = False
-    ) -> CreateWorkflowFromDSLResponse:
+    ) -> WorkflowDSLCreateResponse:
         """Create a new workflow from a Tracecat DSL data object."""
 
         construction_errors = []
@@ -129,39 +146,39 @@ class WorkflowsManagementService:
             # Convert the workflow into a WorkflowDefinition
             # XXX: When we commit from the workflow, we have action IDs
             dsl = DSLInput.model_validate(dsl_data)
-            logger.info("Commiting workflow from database")
+            self.logger.info("Creating workflow from database")
         except* TracecatValidationError as eg:
-            logger.error(eg.message, error=eg.exceptions)
+            self.logger.error(eg.message, error=eg.exceptions)
             construction_errors.extend(
                 RegistryActionValidateResponse.from_dsl_validation_error(e)
                 for e in eg.exceptions
             )
         except* ValidationError as eg:
-            logger.error(eg.message, error=eg.exceptions)
+            self.logger.error(eg.message, error=eg.exceptions)
             construction_errors.extend(
                 RegistryActionValidateResponse.from_pydantic_validation_error(e)
                 for e in eg.exceptions
             )
         if construction_errors:
-            return CreateWorkflowFromDSLResponse(errors=construction_errors)
+            return WorkflowDSLCreateResponse(errors=construction_errors)
 
         if not skip_secret_validation:
             if val_errors := await validate_dsl(session=self.session, dsl=dsl):
-                logger.warning("Validation errors", errors=val_errors)
-                return CreateWorkflowFromDSLResponse(
+                self.logger.warning("Validation errors", errors=val_errors)
+                return WorkflowDSLCreateResponse(
                     errors=[
                         RegistryActionValidateResponse.from_validation_result(val_res)
                         for val_res in val_errors
                     ]
                 )
 
-        logger.warning("Creating workflow from DSL", dsl=dsl)
+        self.logger.warning("Creating workflow from DSL", dsl=dsl)
         try:
             workflow = await self._create_db_workflow_from_dsl(dsl)
-            return CreateWorkflowFromDSLResponse(workflow=workflow)
+            return WorkflowDSLCreateResponse(workflow=workflow)
         except Exception as e:
             # Rollback the transaction on error
-            logger.error(f"Error creating workflow: {e}")
+            self.logger.error(f"Error creating workflow: {e}")
             await self.session.rollback()
             raise e
 
@@ -177,19 +194,19 @@ class WorkflowsManagementService:
         # If it still falsy, raise a user facing error
         if not actions:
             raise TracecatValidationError(
-                "Workflow has no actions. Please add an action to the workflow before committing."
+                "Workflow has no actions. Please add an action to the workflow before saving."
             )
         graph = RFGraph.from_workflow(workflow)
         if not graph.entrypoints:
             raise TracecatValidationError(
-                "Workflow has no entrypoints. Please add an action to the workflow before committing."
+                "Workflow has no entrypoints. Please add an action to the workflow before saving."
             )
         graph_actions = graph.action_nodes()
         if len(graph_actions) != len(actions):
-            logger.warning(
+            self.logger.warning(
                 f"Mismatch between graph actions (view) and workflow actions (model): {len(graph_actions)=} != {len(actions)=}"
             )
-            logger.debug("Actions", graph_actions=graph_actions, actions=actions)
+            self.logger.debug("Actions", graph_actions=graph_actions, actions=actions)
             # NOTE: This likely occurs due to race conditions in the FE
             # To recover from this, we will use the RFGraph object (view) as the source
             # of truth, and remove any orphaned `Actions` in the database
@@ -200,7 +217,7 @@ class WorkflowsManagementService:
             actions = workflow.actions
             if not actions:
                 raise TracecatValidationError(
-                    "Workflow has no actions. Please add an action to the workflow before committing."
+                    "Workflow has no actions. Please add an action to the workflow before saving."
                 )
             if len(graph_actions) != len(actions):
                 raise TracecatValidationError(
@@ -215,6 +232,7 @@ class WorkflowsManagementService:
             inputs=workflow.static_inputs,
             config=DSLConfig(**workflow.config),
             returns=workflow.returns,
+            error_handler=workflow.error_handler,
         )
 
     async def create_workflow_from_external_definition(
@@ -252,7 +270,7 @@ class WorkflowsManagementService:
         updated_at: datetime | None = None,
     ) -> Workflow:
         """Create a new workflow and associated actions in the database from a DSLInput."""
-        logger.info("Creating workflow from DSL", dsl=dsl)
+        self.logger.info("Creating workflow from DSL", dsl=dsl)
         entrypoint = dsl.entrypoint.model_dump()
         workflow_kwargs = {
             "title": dsl.title,
@@ -308,7 +326,7 @@ class WorkflowsManagementService:
 
         # Create and set the graph for the Workflow
         base_graph = RFGraph.with_defaults(workflow)
-        logger.info("Creating graph for workflow", graph=base_graph)
+        self.logger.info("Creating graph for workflow", graph=base_graph)
 
         # Add DSL contents to the Workflow
         ref2id = {act.ref: act.id for act in actions}
@@ -336,4 +354,45 @@ class WorkflowsManagementService:
                 continue
             await self.session.delete(action)
         await self.session.commit()
-        logger.info(f"Deleted orphaned action: {action.title}")
+        self.logger.info(f"Deleted orphaned action: {action.title}")
+
+    @staticmethod
+    @activity.defn
+    async def resolve_workflow_alias_activity(
+        input: ResolveWorkflowAliasActivityInputs,
+    ) -> WorkflowID | None:
+        async with WorkflowsManagementService.with_session(input.role) as service:
+            return await service.resolve_workflow_alias(input.workflow_alias)
+
+    @staticmethod
+    @activity.defn
+    async def get_error_handler_workflow_id(
+        input: GetErrorHandlerWorkflowIDActivityInputs,
+    ) -> WorkflowID | None:
+        args = input.args
+        id_or_alias = None
+        async with WorkflowsManagementService.with_session(role=args.role) as service:
+            if args.dsl:
+                # 1. If a DSL was provided, we must use its error handler
+                if not args.dsl.error_handler:
+                    activity.logger.info("DSL has no error handler")
+                    return None
+                id_or_alias = args.dsl.error_handler
+            else:
+                # 2. Otherwise, use the error handler defined in the workflow
+                workflow = await service.get_workflow(args.wf_id)
+                if not workflow or not workflow.error_handler:
+                    activity.logger.info("No workflow or error handler found")
+                    return None
+                id_or_alias = workflow.error_handler
+
+            # 3. Convert the error handler to an ID
+            if re.match(WF_ID_PATTERN, id_or_alias):
+                handler_wf_id = id_or_alias
+            else:
+                handler_wf_id = await service.resolve_workflow_alias(id_or_alias)
+                if not handler_wf_id:
+                    raise RuntimeError(
+                        f"Couldn't find matching workflow for alias {id_or_alias!r}"
+                    )
+            return handler_wf_id

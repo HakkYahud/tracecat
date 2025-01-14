@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 
 from pydantic import UUID4
+from pydantic_core import to_jsonable_python
 from sqlalchemy import Boolean
 from sqlmodel import cast, func, or_, select
-from sqlmodel.ext.asyncio.session import AsyncSession
 from tracecat_registry import RegistrySecret
 
 from tracecat import config
-from tracecat.contexts import ctx_role
-from tracecat.db.engine import get_async_session_context_manager
 from tracecat.db.schemas import RegistryAction, RegistryRepository
-from tracecat.logger import logger
 from tracecat.registry.actions.models import (
     BoundRegistryAction,
     RegistryActionCreate,
@@ -24,25 +20,14 @@ from tracecat.registry.actions.models import (
 )
 from tracecat.registry.loaders import get_bound_action_impl
 from tracecat.registry.repository import Repository
-from tracecat.types.auth import Role
-from tracecat.types.exceptions import RegistryError, TracecatNotFoundError
+from tracecat.service import BaseService
+from tracecat.types.exceptions import RegistryError
 
 
-class RegistryActionsService:
+class RegistryActionsService(BaseService):
     """Registry actions service."""
 
-    def __init__(self, session: AsyncSession, role: Role | None = None):
-        self.role = role or ctx_role.get()
-        self.session = session
-        self.logger = logger.bind(service="registry_actions")
-
-    @asynccontextmanager
-    @staticmethod
-    async def with_session(
-        role: Role | None = None,
-    ) -> AsyncGenerator[RegistryActionsService, None]:
-        async with get_async_session_context_manager() as session:
-            yield RegistryActionsService(session, role=role)
+    service_name = "registry_actions"
 
     async def list_actions(
         self,
@@ -115,7 +100,7 @@ class RegistryActionsService:
 
         action = RegistryAction(
             owner_id=owner_id,
-            interface=interface,
+            interface=to_jsonable_python(interface),
             **params.model_dump(exclude={"interface"}),
         )
 
@@ -159,58 +144,24 @@ class RegistryActionsService:
         await self.session.commit()
         return action
 
-    async def sync_actions(
-        self, repos: list[RegistryRepository], *, raise_on_error: bool = True
-    ) -> None:
-        """
-        Update the RegistryAction table with the actions from a list of repositories.
-
-        Steps:
-        1. Load actions from a list of repositories
-        2. Update the database with the new actions
-        3. Update the registry manager with the new actions
-        """
-
-        # For each repo, load from origin
-        self.logger.info(
-            "Syncing actions from repositories", repos=[repo.origin for repo in repos]
-        )
-        for repo in repos:
-            try:
-                await self.sync_actions_from_repository(repo)
-            except RegistryError as e:
-                if e.detail == "You cannot sync this repository.":
-                    msg = f"Cannot sync repository {repo.origin!r}: {e}"
-                else:
-                    msg = f"Error while syncing repository {repo.origin!r}: {e}"
-
-                self.logger.warning(msg)
-                if raise_on_error:
-                    raise
-            except TracecatNotFoundError as e:
-                self.logger.warning(
-                    f"Error while syncing repository {repo.origin!r}: {e}"
-                )
-                if raise_on_error:
-                    raise
-            except Exception as e:
-                self.logger.error(
-                    f"Unexpected error while syncing repository: {str(e)}",
-                    repository=repo.origin,
-                )
-                if raise_on_error:
-                    raise
-
-    async def sync_actions_from_repository(self, db_repo: RegistryRepository) -> None:
+    async def sync_actions_from_repository(
+        self, db_repo: RegistryRepository, pull_remote: bool = True
+    ) -> str | None:
         """Sync actions from a repository.
 
         To sync actions from the db repositories:
         - For each repository, we need to reimport the packages to run decorators. (for remote this involves pulling)
         - Scan the repositories for implementation details/metadata and update the DB
         """
+        # (1) Update the API's view of the repository
         repo = Repository(origin=db_repo.origin, role=self.role)
-        await repo.load_from_origin()
+        # Load the repository
+        # After we sync the repository with its remote
+        # None here means we're pulling the remote repository from HEAD
+        sha = None if pull_remote else db_repo.commit_sha
+        commit_sha = await repo.load_from_origin(commit_sha=sha)
 
+        # (2) Handle DB bookkeeping for the API's view of the repository
         # Perform diffing here. The expectation for this endpoint is to sync Tracecat's view of
         # the repository with the remote repository -- meaning any creation/updates/deletions to
         # actions should be propogated to the db.
@@ -274,6 +225,8 @@ class RegistryActionsService:
             updated=n_updated,
             deleted=n_deleted,
         )
+
+        return commit_sha
 
     async def load_action_impl(self, action_name: str) -> BoundRegistryAction:
         """

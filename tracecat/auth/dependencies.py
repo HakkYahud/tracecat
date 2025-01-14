@@ -1,44 +1,85 @@
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 
-from tracecat.auth.credentials import (
-    authenticate_service,
-    authenticate_user,
-    authenticate_user_for_workspace,
-    authenticate_user_or_service_for_workspace,
-    authenticate_user_or_service_org,
-)
+from tracecat import config
+from tracecat.api.common import bootstrap_role
+from tracecat.auth.credentials import RoleACL
+from tracecat.auth.enums import AuthType
+from tracecat.logger import logger
+from tracecat.settings.constants import AUTH_TYPE_TO_SETTING_KEY
+from tracecat.settings.service import get_setting, get_setting_override
 from tracecat.types.auth import Role
 
-WorkspaceUserRole = Annotated[Role, Depends(authenticate_user_for_workspace)]
+WorkspaceUserRole = Annotated[
+    Role,
+    RoleACL(allow_user=True, allow_service=False, require_workspace="yes"),
+]
 """Dependency for a user role for a workspace.
 
 Sets the `ctx_role` context variable.
 """
 
-WorkspaceUserOrServiceRole = Annotated[
-    Role, Depends(authenticate_user_or_service_for_workspace)
-]
-"""Dependency for a user or service role for a workspace.
 
-Sets the `ctx_role` context variable.
-"""
+async def verify_auth_type(auth_type: AuthType) -> None:
+    """Verify if an auth type is enabled and properly configured.
 
-OrgUserRole = Annotated[Role, Depends(authenticate_user)]
-"""Dependency for an organization user role.
+    Args:
+        auth_type: The authentication type to verify
 
-Sets the `ctx_role` context variable.
-"""
+    Raises:
+        HTTPException: If the auth type is not allowed or not enabled
+        ValueError: If the auth type is invalid
+    """
 
-OrgServiceRole = Annotated[Role, Depends(authenticate_service)]
-"""Dependency for an organization service role.
+    # 1. Check that this auth type is allowed
+    if auth_type not in config.TRACECAT__AUTH_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Auth type not allowed",
+        )
 
-Sets the `ctx_role` context variable.
-"""
+    # 2. Check that the setting is enabled
+    key = AUTH_TYPE_TO_SETTING_KEY[auth_type]
+    # 2.5. Check for overrides
+    override = get_setting_override(key)
+    if override is not None:
+        logger.warning(
+            "Overriding auth setting from environment variables. "
+            "This is not recommended for production environments.",
+            key=key,
+            override=override,
+        )
+        return
+    # NOTE: These settings werek introduced after org settings implemented
+    # so no defaults required
+    setting = await get_setting(key=key, role=bootstrap_role())
+    if setting is None or not isinstance(setting, bool):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid setting configuration",
+        )
+    if not setting:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Auth type {auth_type} is not enabled",
+        )
 
-OrgUserOrServiceRole = Annotated[Role, Depends(authenticate_user_or_service_org)]
-"""Dependency for an organization user or service role.
 
-Sets the `ctx_role` context variable.
-"""
+def require_auth_type_enabled(auth_type: AuthType) -> Any:
+    """FastAPI dependency to check if an auth type is enabled.
+
+    Args:
+        auth_type: The authentication type to check
+
+    Returns:
+        FastAPI dependency that verifies the auth type
+    """
+
+    if auth_type not in AUTH_TYPE_TO_SETTING_KEY:
+        raise ValueError(f"Invalid auth type: {auth_type}")
+
+    async def _check_auth_type_enabled() -> None:
+        await verify_auth_type(auth_type)
+
+    return Depends(_check_auth_type_enabled)

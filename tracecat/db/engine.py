@@ -143,7 +143,7 @@ def get_session() -> Generator[Session, None, None]:
         yield session
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession, None, None]:
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async_engine = get_async_engine()
     async with AsyncSession(async_engine, expire_on_commit=False) as async_session:
         yield async_session
@@ -153,7 +153,7 @@ def get_session_context_manager() -> contextlib.AbstractContextManager[Session]:
     return contextlib.contextmanager(get_session)()
 
 
-def get_async_session_context_manager() -> (
-    contextlib.AbstractAsyncContextManager[AsyncSession]
-):
+def get_async_session_context_manager() -> contextlib.AbstractAsyncContextManager[
+    AsyncSession
+]:
     return contextlib.asynccontextmanager(get_async_session)()

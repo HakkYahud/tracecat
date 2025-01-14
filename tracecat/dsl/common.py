@@ -6,27 +6,34 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import Any, Self, TypedDict, cast
+from typing import Any, Self, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
-from tracecat.contexts import RunContext
 from tracecat.db.schemas import Action
 from tracecat.dsl.enums import EdgeType, FailStrategy, LoopStrategy
 from tracecat.dsl.models import (
     ActionStatement,
     DSLConfig,
-    DSLContext,
     DSLEnvironment,
     DSLExecutionError,
+    ExecutionContext,
+    RunContext,
     Trigger,
     TriggerInputs,
 )
 from tracecat.dsl.view import RFEdge, RFGraph, RFNode, TriggerNode, UDFNode, UDFNodeData
 from tracecat.expressions import patterns
+from tracecat.expressions.common import ExprContext
 from tracecat.expressions.expectations import ExpectedField
-from tracecat.expressions.shared import ExprContext
 from tracecat.identifiers import ScheduleID, WorkflowID
 from tracecat.logger import logger
 from tracecat.parse import traverse_leaves
@@ -38,7 +45,7 @@ from tracecat.workflow.actions.models import ActionControlFlow
 class DSLEntrypoint(BaseModel):
     ref: str | None = Field(default=None, description="The entrypoint action ref")
     expects: dict[str, ExpectedField] | None = Field(
-        None,
+        default=None,
         description=(
             "Expected trigger input schema. "
             "Use this to specify the expected shape of the trigger input."
@@ -71,6 +78,9 @@ class DSLInput(BaseModel):
     )
     returns: Any | None = Field(
         default=None, description="The action ref or value to return."
+    )
+    error_handler: str | None = Field(
+        default=None, description="The action ref to handle errors."
     )
 
     @model_validator(mode="after")
@@ -186,9 +196,14 @@ class DSLInput(BaseModel):
                     edges.append(RFEdge(source=trigger_node.id, target=entrypoint_id))
                 else:
                     # Otherwise, add edges for all dependencies
-                    for src_ref in action.depends_on:
+                    for dep_ref in action.depends_on:
+                        src_ref, edge_type = edge_components_from_dep(dep_ref)
                         src_id = ref2id[src_ref]
-                        edges.append(RFEdge(source=src_id, target=dst_id))
+                        edges.append(
+                            RFEdge(
+                                source=src_id, target=dst_id, source_handle=edge_type
+                            )
+                        )
 
             return RFGraph(nodes=nodes, edges=edges)
         except Exception as e:
@@ -219,14 +234,31 @@ class DSLRunArgs(BaseModel):
     )
 
 
-class ExecuteChildWorkflowArgs(TypedDict):
-    workflow_id: WorkflowID
+class ExecuteChildWorkflowArgs(BaseModel):
+    workflow_id: WorkflowID | None = None
+    workflow_alias: str | None = None
     trigger_inputs: TriggerInputs
-    environment: str | None
-    version: int | None
-    loop_strategy: LoopStrategy | None
-    batch_size: int | None
-    fail_strategy: FailStrategy | None
+    environment: str | None = None
+    version: int | None = None
+    loop_strategy: LoopStrategy = LoopStrategy.BATCH
+    batch_size: int = 16
+    fail_strategy: FailStrategy = FailStrategy.ISOLATED
+    timeout: float | None = None
+
+    @model_validator(mode="after")
+    def validate_workflow_id_or_alias(self) -> Self:
+        if self.workflow_id is None and self.workflow_alias is None:
+            # This class enables proper serialization of the error
+            raise PydanticCustomError(
+                "value_error.missing_workflow_identifier",
+                "Either workflow_id or workflow_alias must be provided",
+                {
+                    "workflow_id": self.workflow_id,
+                    "workflow_alias": self.workflow_alias,
+                    "loc": ["workflow_id", "workflow_alias"],
+                },
+            )
+        return self
 
 
 AdjDst = tuple[str, EdgeType]
@@ -300,18 +332,18 @@ def build_action_statements(
     return statements
 
 
-def create_default_dsl_context(
+def create_default_execution_context(
     INPUTS: dict[str, Any] | None = None,
     ACTIONS: dict[str, Any] | None = None,
     TRIGGER: dict[str, Any] | None = None,
     ENV: DSLEnvironment | None = None,
-) -> DSLContext:
-    return DSLContext(
-        INPUTS=INPUTS or {},
-        ACTIONS=ACTIONS or {},
-        TRIGGER=TRIGGER or {},
-        ENV=cast(DSLEnvironment, ENV or {}),
-    )
+) -> ExecutionContext:
+    return {
+        ExprContext.INPUTS: INPUTS or {},
+        ExprContext.ACTIONS: ACTIONS or {},
+        ExprContext.TRIGGER: TRIGGER or {},
+        ExprContext.ENV: cast(DSLEnvironment, ENV or {}),
+    }
 
 
 def dsl_execution_error_from_exception(e: BaseException) -> DSLExecutionError:

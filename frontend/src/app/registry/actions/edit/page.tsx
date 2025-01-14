@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Form, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CustomEditor } from "@/components/editor"
+import { DynamicCustomEditor } from "@/components/editor/dynamic"
 import { CenteredSpinner } from "@/components/loading/spinner"
 
 export default function EditActionPage() {
@@ -112,8 +112,14 @@ function EditTemplateActionView({
 }
 
 const editTemplateActionFormSchema = z.object({
-  origin: z.string(),
-  definition: z.string(),
+  origin: z
+    .string()
+    .min(1, "Origin is required")
+    .max(1000, "Origin cannot exceed 1000 characters"),
+  definition: z
+    .string()
+    .min(1, "Definition is required")
+    .max(50000, "Definition cannot exceed 50,000 characters"),
 })
 
 type EditTemplateActionFormSchema = z.infer<typeof editTemplateActionFormSchema>
@@ -216,9 +222,9 @@ function EditTemplateActionForm({
                     Edit the action template in YAML. Changes will be reflected
                     in workflows immediately.
                   </span>
-                  <CustomEditor
-                    className="h-96 w-full"
-                    defaultLanguage="yaml"
+                  <DynamicCustomEditor
+                    className="min-h-96 min-w-full resize-y overflow-auto"
+                    defaultLanguage="yaml-extended"
                     value={field.value}
                     onChange={field.onChange}
                   />

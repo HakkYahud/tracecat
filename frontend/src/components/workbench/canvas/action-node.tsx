@@ -2,6 +2,7 @@ import React, { useCallback } from "react"
 import Link from "next/link"
 import { useWorkflowBuilder } from "@/providers/builder"
 import {
+  AlertTriangleIcon,
   ChevronDownIcon,
   CircleCheckBigIcon,
   LayoutListIcon,
@@ -10,8 +11,8 @@ import {
 } from "lucide-react"
 import { Node, NodeProps, useEdges } from "reactflow"
 
-import { useAction } from "@/lib/hooks"
-import { cn, slugify } from "@/lib/utils"
+import { useAction, useWorkflowManager } from "@/lib/hooks"
+import { cn, isEmptyObjectOrNullish, slugify } from "@/lib/utils"
 import { CHILD_WORKFLOW_ACTION_TYPE } from "@/lib/workflow"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,15 +57,14 @@ export interface ActionNodeData {
 export type ActionNodeType = Node<ActionNodeData>
 
 export default React.memo(function ActionNode({
-  data: { isConfigured },
   selected,
   id,
 }: NodeProps<ActionNodeData>) {
   const { workflowId, getNode, workspaceId, reactFlow } = useWorkflowBuilder()
   const { toast } = useToast()
-  const isConfiguredMessage = isConfigured ? "ready" : "missing inputs"
   // SAFETY: Node only exists if it's in the workflow
   const { action, actionIsLoading } = useAction(id, workspaceId, workflowId!)
+  const isConfigured = !isEmptyObjectOrNullish(action?.inputs)
 
   const handleDeleteNode = useCallback(async () => {
     try {
@@ -92,6 +92,11 @@ export default React.memo(function ActionNode({
   const incomingEdges = edges.filter((edge) => edge.target === id)
   const isChildWorkflow = action?.type === CHILD_WORKFLOW_ACTION_TYPE
   const childWorkflowId = action?.inputs?.workflow_id
+    ? String(action?.inputs?.workflow_id)
+    : undefined
+  const childWorkflowAlias = action?.inputs?.workflow_alias
+    ? String(action?.inputs?.workflow_alias)
+    : undefined
 
   // Create a skeleton loading state within the card frame
   const renderContent = () => {
@@ -182,28 +187,16 @@ export default React.memo(function ActionNode({
               ) : (
                 <LayoutListIcon className="size-4 text-gray-400" />
               )}
-              <span className="text-xs capitalize">{isConfiguredMessage}</span>
+              <span className="text-xs capitalize">
+                {isConfigured ? "Ready" : "Missing inputs"}
+              </span>
             </div>
             {isChildWorkflow && (
-              <div className="flex justify-end">
-                <Badge
-                  variant="outline"
-                  className="text-foreground/70 hover:cursor-pointer hover:bg-muted-foreground/5"
-                >
-                  {childWorkflowId ? (
-                    <Link
-                      href={`/workspaces/${workspaceId}/workflows/${childWorkflowId}`}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="font-normal">Open workflow</span>
-                        <SquareArrowOutUpRightIcon className="size-3" />
-                      </div>
-                    </Link>
-                  ) : (
-                    <span className="font-normal">Missing workflow ID</span>
-                  )}
-                </Badge>
-              </div>
+              <ChildWorkflowLink
+                workspaceId={workspaceId}
+                childWorkflowId={childWorkflowId}
+                childWorkflowAlias={childWorkflowAlias}
+              />
             )}
           </div>
         </CardContent>
@@ -223,3 +216,65 @@ export default React.memo(function ActionNode({
     </Card>
   )
 })
+
+function ChildWorkflowLink({
+  workspaceId,
+  childWorkflowId,
+  childWorkflowAlias,
+}: {
+  workspaceId: string
+  childWorkflowId?: string
+  childWorkflowAlias?: string
+}) {
+  const { workflows } = useWorkflowManager()
+  const childIdFromAlias = workflows?.find(
+    (w) => w.alias === childWorkflowAlias
+  )?.id
+  const inner = () => {
+    if (childWorkflowId) {
+      return (
+        <Link href={`/workspaces/${workspaceId}/workflows/${childWorkflowId}`}>
+          <div className="flex items-center gap-1">
+            <span className="font-normal">Open workflow</span>
+            <SquareArrowOutUpRightIcon className="size-3" />
+          </div>
+        </Link>
+      )
+    }
+    if (childWorkflowAlias) {
+      if (!childIdFromAlias) {
+        return (
+          <div className="flex items-center gap-1">
+            <span className="font-normal">Cannot find workflow by alias</span>
+            <AlertTriangleIcon className="size-3 text-red-500" />
+          </div>
+        )
+      }
+      return (
+        <div className="flex items-center gap-1">
+          <Link
+            href={`/workspaces/${workspaceId}/workflows/${childIdFromAlias}`}
+          >
+            <div className="flex items-center gap-1">
+              <span className="font-mono font-normal tracking-tighter text-foreground/80">
+                {childWorkflowAlias}
+              </span>
+              <SquareArrowOutUpRightIcon className="size-3" />
+            </div>
+          </Link>
+        </div>
+      )
+    }
+    return <span className="font-normal">Missing identifier</span>
+  }
+  return (
+    <div className="flex justify-end">
+      <Badge
+        variant="outline"
+        className="text-foreground/70 hover:cursor-pointer hover:bg-muted-foreground/5"
+      >
+        {inner()}
+      </Badge>
+    </div>
+  )
+}

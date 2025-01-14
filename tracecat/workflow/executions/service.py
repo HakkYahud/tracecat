@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
-from collections.abc import AsyncGenerator, Awaitable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable
 from typing import Any
 
 import orjson
@@ -19,6 +19,7 @@ from temporalio.client import (
     WorkflowHandle,
     WorkflowHistoryEventFilterType,
 )
+from temporalio.service import RPCError
 
 from tracecat import config
 from tracecat.contexts import ctx_role
@@ -30,8 +31,7 @@ from tracecat.dsl.workflow import DSLWorkflow, retry_policies
 from tracecat.identifiers.workflow import (
     WorkflowExecutionID,
     WorkflowID,
-    WorkflowScheduleID,
-    exec_id,
+    generate_exec_id,
 )
 from tracecat.logger import logger
 from tracecat.types.auth import Role
@@ -55,10 +55,10 @@ class WorkflowExecutionsService:
         self.logger = logger.bind(service="workflow_executions")
 
     @staticmethod
-    async def connect() -> WorkflowExecutionsService:
+    async def connect(role: Role | None = None) -> WorkflowExecutionsService:
         """Initialize and connect to the service."""
         client = await get_temporal_client()
-        return WorkflowExecutionsService(client=client)
+        return WorkflowExecutionsService(client=client, role=role)
 
     def handle(self, wf_exec_id: WorkflowExecutionID) -> WorkflowHandle:
         return self._client.get_workflow_handle(wf_exec_id)
@@ -338,7 +338,7 @@ class WorkflowExecutionsService:
                         )
                     )
                 case _:
-                    logger.debug("Unhandled event type", event_type=event.event_type)
+                    logger.trace("Unhandled event type", event_type=event.event_type)
                     continue
         return events
 
@@ -372,16 +372,16 @@ class WorkflowExecutionsService:
         return CreateWorkflowExecutionResponse(
             message="Workflow execution started",
             wf_id=wf_id,
-            wf_exec_id=exec_id(wf_id),
+            wf_exec_id=generate_exec_id(wf_id),
         )
 
-    def create_workflow_execution(
+    async def create_workflow_execution(
         self,
         dsl: DSLInput,
         *,
         wf_id: WorkflowID,
         payload: TriggerInputs | None = None,
-    ) -> Coroutine[Any, Any, DispatchWorkflowResult]:
+    ) -> DispatchWorkflowResult:
         """Create a new workflow execution.
 
         Note: This method blocks until the workflow execution completes.
@@ -393,11 +393,10 @@ class WorkflowExecutionsService:
                 validation_result.msg, detail=validation_result.detail
             )
 
-        wf_exec_id = exec_id(wf_id)
-        return self._dispatch_workflow(
+        return await self._dispatch_workflow(
             dsl=dsl,
             wf_id=wf_id,
-            wf_exec_id=wf_exec_id,
+            wf_exec_id=generate_exec_id(wf_id),
             trigger_inputs=payload,
         )
 
@@ -411,6 +410,10 @@ class WorkflowExecutionsService:
     ) -> DispatchWorkflowResult:
         if rpc_timeout := config.TEMPORAL__CLIENT_RPC_TIMEOUT:
             kwargs["rpc_timeout"] = datetime.timedelta(seconds=float(rpc_timeout))
+        if task_timeout := config.TEMPORAL__TASK_TIMEOUT:
+            kwargs.setdefault(
+                "task_timeout", datetime.timedelta(seconds=float(task_timeout))
+            )
 
         logger.info(
             f"Executing DSL workflow: {dsl.title}",
@@ -433,27 +436,35 @@ class WorkflowExecutionsService:
                 **kwargs,
             )
         except WorkflowFailureError as e:
-            self.logger.error(str(e), role=self.role, wf_exec_id=wf_exec_id, e=e)
+            self.logger.error(
+                str(e), role=self.role, wf_exec_id=wf_exec_id, cause=e.cause
+            )
             raise e
+        except RPCError as e:
+            self.logger.error(
+                f"Temporal service RPC error occurred while executing the workflow: {e}",
+                role=self.role,
+                wf_exec_id=wf_exec_id,
+                e=e,
+            )
+            raise e
+
         except Exception as e:
             self.logger.exception(
                 "Unexpected workflow error", role=self.role, wf_exec_id=wf_exec_id, e=e
             )
             raise e
         self.logger.debug(f"Workflow result:\n{json.dumps(result, indent=2)}")
-        return DispatchWorkflowResult(wf_id=wf_id, final_context=result)
+        return DispatchWorkflowResult(wf_id=wf_id, result=result)
 
     def cancel_workflow_execution(
-        self,
-        wf_exec_id: WorkflowExecutionID | WorkflowScheduleID,
+        self, wf_exec_id: WorkflowExecutionID
     ) -> Awaitable[None]:
         """Cancel a workflow execution."""
         return self.handle(wf_exec_id).cancel()
 
     def terminate_workflow_execution(
-        self,
-        wf_exec_id: WorkflowExecutionID | WorkflowScheduleID,
-        reason: str | None = None,
+        self, wf_exec_id: WorkflowExecutionID, reason: str | None = None
     ) -> Awaitable[None]:
         """Terminate a workflow execution."""
         return self.handle(wf_exec_id).terminate(reason=reason)

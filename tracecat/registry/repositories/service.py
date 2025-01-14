@@ -1,36 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 
 from pydantic import UUID4
 from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from tracecat import config
-from tracecat.contexts import ctx_role
-from tracecat.db.engine import get_async_session_context_manager
 from tracecat.db.schemas import RegistryRepository
-from tracecat.logger import logger
-from tracecat.registry.repositories.models import RegistryRepositoryCreate
-from tracecat.types.auth import Role
+from tracecat.registry.repositories.models import (
+    RegistryRepositoryCreate,
+    RegistryRepositoryUpdate,
+)
+from tracecat.service import BaseService
 
 
-class RegistryReposService:
+class RegistryReposService(BaseService):
     """Registry repository service."""
 
-    def __init__(self, session: AsyncSession, role: Role | None = None):
-        self.role = role or ctx_role.get()
-        self.session = session
-        self.logger = logger.bind(service="registry-repositories")
-
-    @asynccontextmanager
-    @staticmethod
-    async def with_session(
-        role: Role | None = None,
-    ) -> AsyncGenerator[RegistryReposService, None]:
-        async with get_async_session_context_manager() as session:
-            yield RegistryReposService(session, role=role)
+    service_name = "registry_repositories"
 
     async def list_repositories(self) -> Sequence[RegistryRepository]:
         """Get all registry repositories."""
@@ -46,11 +33,11 @@ class RegistryReposService:
         result = await self.session.exec(statement)
         return result.one_or_none()
 
-    async def get_repository_by_id(self, id: UUID4) -> RegistryRepository | None:
+    async def get_repository_by_id(self, id: UUID4) -> RegistryRepository:
         """Get a registry by ID."""
         statement = select(RegistryRepository).where(RegistryRepository.id == id)
         result = await self.session.exec(statement)
-        return result.one_or_none()
+        return result.one()
 
     async def create_repository(
         self, params: RegistryRepositoryCreate
@@ -65,9 +52,11 @@ class RegistryReposService:
         return repository
 
     async def update_repository(
-        self, repository: RegistryRepository
+        self, repository: RegistryRepository, params: RegistryRepositoryUpdate
     ) -> RegistryRepository:
         """Update a registry repository."""
+        for key, value in params.model_dump(exclude_unset=True).items():
+            setattr(repository, key, value)
         self.session.add(repository)
         await self.session.commit()
         await self.session.refresh(repository)

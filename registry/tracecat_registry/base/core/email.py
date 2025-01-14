@@ -2,14 +2,18 @@
 # XXX(WARNING): Do not import __future__ annotations from typing
 # This will cause class types to be resolved as strings
 
+import json
 import re
 import smtplib
 import socket
 import ssl
+from copy import deepcopy
 from email.message import EmailMessage
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
+import nh3
 from pydantic import Field
+from tracecat.config import TRACECAT__ALLOWED_EMAIL_ATTRIBUTES
 
 from tracecat_registry import RegistrySecret, registry, secrets
 
@@ -35,13 +39,38 @@ def _build_email_message(
     recipients: list[str],
     subject: str,
     body: str,
+    content_type: str,
     bcc: str | list[str] | None = None,
     cc: str | list[str] | None = None,
     reply_to: str | list[str] | None = None,
     headers: dict[str, str] | None = None,
 ) -> EmailMessage:
     msg = EmailMessage()
-    msg.set_content(body)
+
+    # Handle content based on content_type
+    if content_type == "text/html":
+        # Follow MIME standards for HTML emails
+        # https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html
+        msg.add_alternative(
+            "This email requires an HTML viewer to display properly.", subtype="plain"
+        )
+        if TRACECAT__ALLOWED_EMAIL_ATTRIBUTES:
+            ALLOWED_ATTRIBUTES = deepcopy(nh3.ALLOWED_ATTRIBUTES)
+            for tag, attributes in json.loads(
+                TRACECAT__ALLOWED_EMAIL_ATTRIBUTES
+            ).items():
+                ALLOWED_ATTRIBUTES[tag] = set(attributes)
+            sanitized_body = nh3.clean(body, attributes=ALLOWED_ATTRIBUTES)
+        else:
+            sanitized_body = nh3.clean(body)
+        msg.add_alternative(sanitized_body, subtype="html")
+    elif content_type == "text/plain":
+        msg.set_content(body)
+    else:
+        raise ValueError(
+            f"Unsupported content type: {content_type}. Expected 'text/plain' or 'text/html'."
+        )
+
     msg["From"] = sender
     msg["To"] = recipients
     msg["Subject"] = subject
@@ -77,6 +106,13 @@ def send_email_smtp(
     ],
     subject: Annotated[str, Field(..., description="Subject of the email")],
     body: Annotated[str, Field(..., description="Body content of the email")],
+    content_type: Annotated[
+        Literal["text/plain", "text/html"],
+        Field(
+            None,
+            description="Email content type ('text/plain' or 'text/html'). Defaults to 'text/plain'.",
+        ),
+    ] = "text/plain",
     timeout: Annotated[
         float | None, Field(None, description="Timeout for SMTP operations in seconds")
     ] = None,
@@ -116,7 +152,9 @@ def send_email_smtp(
     smtp_user = secrets.get("SMTP_USER")
     smtp_pass = secrets.get("SMTP_PASS")
 
-    msg = _build_email_message(sender, recipients, subject, body, headers=headers)
+    msg = _build_email_message(
+        sender, recipients, subject, body, content_type=content_type, headers=headers
+    )
 
     context = ssl.create_default_context()
     if ignore_cert_errors:

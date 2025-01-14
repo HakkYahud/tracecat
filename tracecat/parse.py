@@ -1,5 +1,9 @@
+import re
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import urlparse, urlunparse
+
+from tracecat.expressions import patterns
 
 
 def insert_obj_by_path(
@@ -39,3 +43,22 @@ def traverse_leaves(obj: Any, parent_key: str = "") -> Iterator[tuple[str, Any]]
             yield from traverse_leaves(item, new_key)
     else:
         yield parent_key, obj
+
+
+def traverse_expressions(obj: Any) -> Iterator[str]:
+    """Return an iterator of all expressions in a nested object."""
+    for _, value in traverse_leaves(obj):
+        if not isinstance(value, str):
+            continue
+        for match in re.finditer(patterns.TEMPLATE_STRING, value):
+            if expr := match.group("expr"):
+                yield expr
+
+
+def safe_url(url: str) -> str:
+    """Remove credentials from a url."""
+    url_obj = urlparse(url)
+    # XXX(safety): Reconstruct url without credentials.
+    # Note that we do not recommend passing credentials in the url.
+    cleaned_url = urlunparse((url_obj.scheme, url_obj.netloc, url_obj.path, "", "", ""))
+    return cleaned_url

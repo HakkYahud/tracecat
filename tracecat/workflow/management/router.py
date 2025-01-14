@@ -1,11 +1,10 @@
 import json
-from typing import Annotated, Literal
+from typing import Literal
 
 import orjson
 import yaml
 from fastapi import (
     APIRouter,
-    Depends,
     File,
     Form,
     HTTPException,
@@ -18,16 +17,15 @@ from pydantic import ValidationError
 from slugify import slugify
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
-from tracecat.auth.credentials import authenticate_user_for_workspace
-from tracecat.db.engine import get_async_session
+from tracecat.auth.dependencies import WorkspaceUserRole
+from tracecat.db.dependencies import AsyncDBSession
 from tracecat.db.schemas import Webhook, Workflow, WorkflowDefinition
 from tracecat.dsl.models import DSLConfig
 from tracecat.identifiers import WorkflowID
 from tracecat.logger import logger
 from tracecat.registry.actions.models import RegistryActionValidateResponse
-from tracecat.types.auth import Role
+from tracecat.tags.models import TagRead
 from tracecat.types.exceptions import TracecatValidationError
 from tracecat.validation.service import validate_dsl
 from tracecat.webhooks.models import UpsertWebhookParams, WebhookResponse
@@ -35,51 +33,61 @@ from tracecat.workflow.actions.models import ActionRead
 from tracecat.workflow.management.definitions import WorkflowDefinitionsService
 from tracecat.workflow.management.management import WorkflowsManagementService
 from tracecat.workflow.management.models import (
-    CommitWorkflowResponse,
-    CreateWorkflowParams,
     ExternalWorkflowDefinition,
-    UpdateWorkflowParams,
-    WorkflowMetadataResponse,
-    WorkflowResponse,
+    WorkflowCommitResponse,
+    WorkflowCreate,
+    WorkflowRead,
+    WorkflowReadMinimal,
+    WorkflowUpdate,
 )
 
 router = APIRouter(prefix="/workflows")
-
-WorkspaceUserRole = Annotated[Role, Depends(authenticate_user_for_workspace)]
-AsyncDBSession = Annotated[AsyncSession, Depends(get_async_session)]
 
 
 @router.get("", tags=["workflows"])
 async def list_workflows(
     role: WorkspaceUserRole,
     session: AsyncDBSession,
-) -> list[WorkflowMetadataResponse]:
+    filter_tags: list[str] | None = Query(
+        default=None,
+        description="Filter workflows by tags",
+        alias="tag",
+    ),
+) -> list[WorkflowReadMinimal]:
     """List workflows."""
     service = WorkflowsManagementService(session, role=role)
-    workflows = await service.list_workflows()
-    return [
-        WorkflowMetadataResponse(
-            id=workflow.id,
-            title=workflow.title,
-            description=workflow.description,
-            status=workflow.status,
-            icon_url=workflow.icon_url,
-            created_at=workflow.created_at,
-            updated_at=workflow.updated_at,
-            version=workflow.version,
+    workflows = await service.list_workflows(tags=filter_tags)
+    res = []
+    for workflow in workflows:
+        tags = [
+            TagRead.model_validate(tag, from_attributes=True) for tag in workflow.tags
+        ]
+        res.append(
+            WorkflowReadMinimal(
+                id=workflow.id,
+                title=workflow.title,
+                description=workflow.description,
+                status=workflow.status,
+                icon_url=workflow.icon_url,
+                created_at=workflow.created_at,
+                updated_at=workflow.updated_at,
+                version=workflow.version,
+                tags=tags,
+                alias=workflow.alias,
+                error_handler=workflow.error_handler,
+            )
         )
-        for workflow in workflows
-    ]
+    return res
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, tags=["workflows"])
 async def create_workflow(
     role: WorkspaceUserRole,
     session: AsyncDBSession,
-    title: str | None = Form(None),
-    description: str | None = Form(None),
-    file: UploadFile | None = File(None),
-) -> WorkflowMetadataResponse:
+    title: str | None = Form(default=None, min_length=1, max_length=100),
+    description: str | None = Form(default=None, max_length=1000),
+    file: UploadFile | None = File(default=None),
+) -> WorkflowReadMinimal:
     """Create a new Workflow.
 
     Optionally, you can provide a YAML file to create a workflow.
@@ -147,9 +155,9 @@ async def create_workflow(
             ) from e
     else:
         workflow = await service.create_workflow(
-            CreateWorkflowParams(title=title, description=description)
+            WorkflowCreate(title=title, description=description)
         )
-    return WorkflowMetadataResponse(
+    return WorkflowReadMinimal(
         id=workflow.id,
         title=workflow.title,
         description=workflow.description,
@@ -158,6 +166,7 @@ async def create_workflow(
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
         version=workflow.version,
+        error_handler=workflow.error_handler,
     )
 
 
@@ -166,7 +175,7 @@ async def get_workflow(
     role: WorkspaceUserRole,
     session: AsyncDBSession,
     workflow_id: WorkflowID,
-) -> WorkflowResponse:
+) -> WorkflowRead:
     """Return Workflow as title, description, list of Action JSONs, adjacency list of Action IDs."""
     # Get Workflow given workflow_id
     service = WorkflowsManagementService(session, role=role)
@@ -181,7 +190,7 @@ async def get_workflow(
         action.id: ActionRead(**action.model_dump()) for action in actions
     }
     # Add webhook/schedules
-    return WorkflowResponse(
+    return WorkflowRead(
         id=workflow.id,
         owner_id=workflow.owner_id,
         title=workflow.title,
@@ -197,6 +206,8 @@ async def get_workflow(
         actions=actions_responses,
         webhook=WebhookResponse(**workflow.webhook.model_dump()),
         schedules=workflow.schedules or [],
+        alias=workflow.alias,
+        error_handler=workflow.error_handler,
     )
 
 
@@ -209,12 +220,12 @@ async def update_workflow(
     role: WorkspaceUserRole,
     session: AsyncDBSession,
     workflow_id: WorkflowID,
-    params: UpdateWorkflowParams,
+    params: WorkflowUpdate,
 ) -> None:
     """Update a workflow."""
     service = WorkflowsManagementService(session, role=role)
     try:
-        await service.update_wrkflow(workflow_id, params=params)
+        await service.update_workflow(workflow_id, params=params)
     except NoResultFound as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found"
@@ -247,7 +258,7 @@ async def commit_workflow(
     role: WorkspaceUserRole,
     session: AsyncDBSession,
     workflow_id: WorkflowID,
-) -> CommitWorkflowResponse:
+) -> WorkflowCommitResponse:
     """Commit a workflow.
 
     This deploys the workflow and updates its version. If a YAML file is provided, it will override the workflow in the database."""
@@ -285,7 +296,7 @@ async def commit_workflow(
             )
 
         if construction_errors:
-            return CommitWorkflowResponse(
+            return WorkflowCommitResponse(
                 workflow_id=workflow_id,
                 status="failure",
                 message=f"Workflow definition construction failed with {len(construction_errors)} errors",
@@ -297,7 +308,7 @@ async def commit_workflow(
 
         if val_errors := await validate_dsl(session=session, dsl=dsl):
             logger.warning("Validation errors", errors=val_errors)
-            return CommitWorkflowResponse(
+            return WorkflowCommitResponse(
                 workflow_id=workflow_id,
                 status="failure",
                 message=f"{len(val_errors)} validation error(s)",
@@ -326,7 +337,7 @@ async def commit_workflow(
         await session.refresh(workflow)
         await session.refresh(defn)
 
-        return CommitWorkflowResponse(
+        return WorkflowCommitResponse(
             workflow_id=workflow_id,
             status="success",
             message="Workflow committed successfully.",
