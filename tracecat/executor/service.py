@@ -1,8 +1,3 @@
-"""Functions for executing actions and templates.
-
-NOTE: This is only used in the API server, not the worker
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +8,8 @@ from typing import Any, cast
 import ray
 import uvloop
 from ray.exceptions import RayTaskError
+from ray.runtime_env import RuntimeEnv
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from tracecat import config
 from tracecat.auth.sandbox import AuthSandbox
@@ -27,22 +24,22 @@ from tracecat.dsl.models import (
     RunActionInput,
 )
 from tracecat.executor.engine import EXECUTION_TIMEOUT
-from tracecat.executor.models import ExecutorActionErrorInfo
+from tracecat.executor.models import DispatchActionContext, ExecutorActionErrorInfo
 from tracecat.expressions.common import ExprContext, ExprOperand
 from tracecat.expressions.eval import (
     eval_templated_object,
     extract_templated_secrets,
     get_iterables_from_expression,
 )
+from tracecat.git import GitUrl, prepare_git_url
 from tracecat.logger import logger
 from tracecat.parse import traverse_leaves
-from tracecat.registry.actions.models import (
-    BoundRegistryAction,
-)
+from tracecat.registry.actions.models import BoundRegistryAction
 from tracecat.registry.actions.service import RegistryActionsService
 from tracecat.secrets.common import apply_masks_object
 from tracecat.secrets.constants import DEFAULT_SECRETS_ENVIRONMENT
 from tracecat.secrets.secrets_manager import env_sandbox
+from tracecat.ssh import opt_temp_key_file
 from tracecat.types.auth import Role
 from tracecat.types.exceptions import TracecatException, WrappedExecutionError
 
@@ -110,37 +107,13 @@ async def run_single_action(
     context: ExecutionContext,
 ) -> Any:
     """Run a UDF async."""
-
-    # Here, we pass in context
-    # For this action, check whether its dependent secrets are already in the context
-    # For any that aren't, pull them in
-
-    action_secret_names = set()
-    optional_secrets = set()
-    secrets = context.get(ExprContext.SECRETS, {})
-
-    for secret in action.secrets or []:
-        # Only add if not already pulled
-        if secret.name not in secrets:
-            if secret.optional:
-                optional_secrets.add(secret.name)
-            action_secret_names.add(secret.name)
-
-    args_secret_refs = set(extract_templated_secrets(args))
-    async with AuthSandbox(
-        secrets=list(action_secret_names | args_secret_refs),
-        target="context",
-        environment=get_runtime_env(),
-        optional_secrets=list(optional_secrets),
-    ) as sandbox:
-        secrets |= sandbox.secrets.copy()
-
-    context[ExprContext.SECRETS] = context.get(ExprContext.SECRETS, {}) | secrets
     if action.is_template:
         logger.info("Running template action async", action=action.name)
         result = await run_template_action(action=action, args=args, context=context)
     else:
         logger.trace("Running UDF async", action=action.name)
+        # Get secrets from context
+        secrets = context.get(ExprContext.SECRETS, {})
         flat_secrets = flatten_secrets(secrets)
         with env_sandbox(flat_secrets):
             result = await _run_action_direct(action=action, args=args)
@@ -192,7 +165,7 @@ async def run_template_action(
         )
         async with RegistryActionsService.with_session() as service:
             step_action = await service.load_action_impl(action_name=step.action)
-        logger.trace("Running action step", step_ation=step_action.action)
+        logger.trace("Running action step", step_action=step_action.action)
         result = await run_single_action(
             action=step_action,
             args=evaled_args,
@@ -220,34 +193,25 @@ async def run_action_from_input(input: RunActionInput, role: Role) -> Any:
     task = input.task
     action_name = task.action
 
-    # Multi-phase expression resolution
-    # ---------------------------------
-    # 1. Resolve all expressions in all shared (non action-local) contexts
-    # 2. Enter loop iteration (if any)
-    # 3. Resolve all action-local expressions
-
-    # Set
-    # If there's a for loop, we need to process this action in parallel
-
-    # Evaluate `SECRETS` context (XXX: You likely should use the secrets manager instead)
-    # --------------------------
-    # Securely inject secrets into the task arguments
-    # 1. Find all secrets in the task arguments
-    # 2. Load the secrets
-    # 3. Inject the secrets into the task arguments using an enriched context
-    # NOTE: Regardless of loop iteration, we should only make this call/substitution once!!
-
     async with RegistryActionsService.with_session() as service:
-        action = await service.load_action_impl(action_name=action_name)
+        reg_action = await service.get_action(action_name)
+        action_secrets = await service.fetch_all_action_secrets(reg_action)
+        action = service.get_bound(reg_action)
 
-    action_secret_names = {secret.name for secret in action.secrets or []}
-    optional_secrets = {
-        secret.name for secret in action.secrets or [] if secret.optional
-    }
-    args_secret_refs = set(extract_templated_secrets(task.args))
+    args_secrets = set(extract_templated_secrets(task.args))
+    optional_secrets = {s.name for s in action_secrets if s.optional}
+    required_secrets = {s.name for s in action_secrets if not s.optional}
+
+    logger.info(
+        "Required secrets",
+        required_secrets=required_secrets,
+        optional_secrets=optional_secrets,
+        args_secrets=args_secrets,
+    )
+
+    # Get all secrets in one call
     async with AuthSandbox(
-        secrets=list(action_secret_names | args_secret_refs),
-        target="context",
+        secrets=list(required_secrets | args_secrets),
         environment=get_runtime_env(),
         optional_secrets=list(optional_secrets),
     ) as sandbox:
@@ -319,15 +283,27 @@ def run_action_task(input: RunActionInput, role: Role) -> ExecutionResult:
 
 
 async def run_action_on_ray_cluster(
-    input: RunActionInput, role: Role
+    input: RunActionInput, ctx: DispatchActionContext
 ) -> ExecutionResult:
     """Run an action on the ray cluster.
 
     If any exceptions are thrown here, they're platform level errors.
     All application/user level errors are caught by the executor and returned as values.
     """
+    # Initialize runtime environment variables
+    env_vars = {"GIT_SSH_COMMAND": ctx.ssh_command} if ctx.ssh_command else {}
+    additional_vars: dict[str, Any] = {}
 
-    obj_ref = run_action_task.remote(input, role)
+    # Add git URL to pip dependencies if SHA is present
+    if ctx.git_url and ctx.git_url.ref:
+        url = ctx.git_url.to_url()
+        additional_vars["pip"] = [url]
+        logger.trace("Adding git URL to runtime env", git_url=ctx.git_url, url=url)
+
+    runtime_env = RuntimeEnv(env_vars=env_vars, **additional_vars)
+
+    logger.info("Running action on ray cluster", runtime_env=runtime_env)
+    obj_ref = run_action_task.options(runtime_env=runtime_env).remote(input, ctx.role)
     try:
         coro = asyncio.to_thread(ray.get, obj_ref)
         exec_result = await asyncio.wait_for(coro, timeout=EXECUTION_TIMEOUT)
@@ -349,7 +325,12 @@ async def run_action_on_ray_cluster(
     return exec_result
 
 
-async def dispatch_action_on_cluster(input: RunActionInput, role: Role) -> Any:
+async def dispatch_action_on_cluster(
+    input: RunActionInput,
+    *,
+    session: AsyncSession,
+    git_url: GitUrl | None = None,
+) -> Any:
     """Schedule actions on the ray cluster.
 
     This function handles dispatching actions to be executed on a Ray cluster. It supports
@@ -358,7 +339,7 @@ async def dispatch_action_on_cluster(input: RunActionInput, role: Role) -> Any:
     Args:
         input: The RunActionInput containing the task definition and execution context
         role: The Role used for authorization
-
+        git_url: The Git URL to use for the action
     Returns:
         Any: For single actions, returns the ExecutionResult. For for_each loops, returns
              a list of results from all parallel executions.
@@ -367,12 +348,26 @@ async def dispatch_action_on_cluster(input: RunActionInput, role: Role) -> Any:
         TracecatException: If there are errors evaluating for_each expressions or during execution
         ExecutorErrorWrapper: If there are errors from the executor itself
     """
+    git_url = await prepare_git_url()
 
+    role = ctx_role.get()
+
+    async with opt_temp_key_file(git_url=git_url, session=session) as ssh_command:
+        logger.trace("SSH command", ssh_command=ssh_command)
+        ctx = DispatchActionContext(role=role, git_url=git_url, ssh_command=ssh_command)
+        result = await _dispatch_action(input=input, ctx=ctx)
+    return result
+
+
+async def _dispatch_action(
+    input: RunActionInput,
+    ctx: DispatchActionContext,
+) -> Any:
     task = input.task
-
+    logger.info("Preparing runtime environment", ctx=ctx)
     # If there's no for_each, execute normally
     if not task.for_each:
-        return await run_action_on_ray_cluster(input, role)
+        return await run_action_on_ray_cluster(input, ctx)
 
     logger.info("Running for_each on action in parallel", action=task.action)
 
@@ -383,7 +378,7 @@ async def dispatch_action_on_cluster(input: RunActionInput, role: Role) -> Any:
     iterators = get_iterables_from_expression(expr=task.for_each, operand=base_context)
 
     async def coro(patched_input: RunActionInput):
-        return await run_action_on_ray_cluster(patched_input, role)
+        return await run_action_on_ray_cluster(patched_input, ctx)
 
     try:
         async with GatheringTaskGroup() as tg:

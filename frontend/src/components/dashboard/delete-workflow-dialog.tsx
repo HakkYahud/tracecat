@@ -36,10 +36,10 @@ export function DeleteWorkflowAlertDialog({
       {children}
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+          <AlertDialogTitle>Delete workflow</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to remove this secret from the workflow? This
-            action cannot be undone.
+            Are you sure you want to delete this workflow? This action cannot be
+            undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

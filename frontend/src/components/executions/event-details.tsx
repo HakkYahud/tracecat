@@ -1,5 +1,5 @@
 import React from "react"
-import { DSLRunArgs, EventHistoryResponse, RunActionInput } from "@/client"
+import { DSLRunArgs, RunActionInput, WorkflowExecutionEvent } from "@/client"
 import JsonView from "react18-json-view"
 
 import {
@@ -34,6 +34,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { CodeBlock } from "@/components/code-block"
 import { GenericWorkflowIcon, getIcon } from "@/components/icons"
 
 /**
@@ -44,7 +45,7 @@ import { GenericWorkflowIcon, getIcon } from "@/components/icons"
 export function WorkflowExecutionEventDetailView({
   event,
 }: {
-  event: EventHistoryResponse
+  event: WorkflowExecutionEvent
 }) {
   return (
     <div className="size-full overflow-auto">
@@ -142,7 +143,7 @@ export function WorkflowExecutionEventDetailView({
   )
 }
 
-export function EventGeneralInfo({ event }: { event: EventHistoryResponse }) {
+export function EventGeneralInfo({ event }: { event: WorkflowExecutionEvent }) {
   const {
     event_group,
     role,
@@ -476,27 +477,6 @@ function isDSLRunArgs(actionInput: unknown): actionInput is DSLRunArgs {
     // Check specific properties of DSLRunArgs
     typeof (actionInput as DSLRunArgs).dsl === "object" &&
     (actionInput as DSLRunArgs).wf_id !== undefined
-  )
-}
-
-function CodeBlock({
-  title,
-  children,
-}: {
-  title?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="space-y-2">
-      {title && (
-        <span className="text-xs font-semibold text-foreground/50">
-          {title}
-        </span>
-      )}
-      <pre className="flex flex-col overflow-auto text-wrap rounded-md border bg-muted-foreground/5 p-4 font-mono text-foreground/70">
-        {children}
-      </pre>
-    </div>
   )
 }
 

@@ -55,7 +55,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateWorkflowExecutionResponse'
+                $ref: '#/components/schemas/WorkflowExecutionCreateResponse'
         '422':
           description: Validation Error
           content:
@@ -972,6 +972,35 @@ paths:
             pattern: wf-[0-9a-f]{32}
           - type: 'null'
           title: Workflow Id
+      - name: trigger
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/TriggerType'
+          - type: 'null'
+          title: Trigger
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid4
+          - $ref: '#/components/schemas/SpecialUserID'
+          - type: 'null'
+          title: User Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Limit
       - name: workspace_id
         in: query
         required: true
@@ -987,7 +1016,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/WorkflowExecutionResponse'
+                  $ref: '#/components/schemas/WorkflowExecutionReadMinimal'
                 title: Response Workflow-Executions-List Workflow Executions
         '422':
           description: Validation Error
@@ -1017,14 +1046,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateWorkflowExecutionParams'
+              $ref: '#/components/schemas/WorkflowExecutionCreate'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateWorkflowExecutionResponse'
+                $ref: '#/components/schemas/WorkflowExecutionCreateResponse'
         '422':
           description: Validation Error
           content:
@@ -1062,20 +1091,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkflowExecutionResponse'
+                $ref: '#/components/schemas/WorkflowExecutionRead'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /workflow-executions/{execution_id}/history:
+  /workflow-executions/{execution_id}/compact:
     get:
       tags:
       - workflow-executions
-      summary: List Workflow Execution Event History
+      summary: Get Workflow Execution Compact
       description: Get a workflow execution.
-      operationId: workflow-executions-list_workflow_execution_event_history
+      operationId: workflow-executions-get_workflow_execution_compact
       security:
       - APIKeyCookie: []
       - APIKeyHeader: []
@@ -1100,11 +1129,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/EventHistoryResponse'
-                title: Response Workflow-Executions-List Workflow Execution Event
-                  History
+                $ref: '#/components/schemas/WorkflowExecutionReadCompact'
         '422':
           description: Validation Error
           content:
@@ -1175,7 +1200,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TerminateWorkflowExecutionParams'
+              $ref: '#/components/schemas/WorkflowExecutionTerminate'
       responses:
         '204':
           description: Successful Response
@@ -1524,6 +1549,7 @@ paths:
         schema:
           anyOf:
           - type: array
+            uniqueItems: true
             items:
               type: string
           - type: 'null'
@@ -1536,6 +1562,7 @@ paths:
         schema:
           anyOf:
           - type: array
+            uniqueItems: true
             items:
               type: string
               pattern: secret-[0-9a-f]{32}
@@ -1549,32 +1576,19 @@ paths:
         schema:
           anyOf:
           - type: array
+            uniqueItems: true
             items:
               $ref: '#/components/schemas/SecretType'
           - type: 'null'
           description: Filter by secret type
           title: Type
         description: Filter by secret type
-      - name: level
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: array
-            items:
-              $ref: '#/components/schemas/SecretLevel'
-          - type: 'null'
-          description: Filter by secret level
-          title: Level
-        description: Filter by secret level
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       responses:
         '200':
@@ -1609,30 +1623,19 @@ paths:
         schema:
           anyOf:
           - type: array
+            uniqueItems: true
             items:
               $ref: '#/components/schemas/SecretType'
           - type: 'null'
           description: Filter by secret type
           title: Type
         description: Filter by secret type
-      - name: level
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - $ref: '#/components/schemas/SecretLevel'
-          - type: 'null'
-          description: Filter by secret level
-          title: Level
-        description: Filter by secret level
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       responses:
         '200':
@@ -1662,12 +1665,10 @@ paths:
       parameters:
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       requestBody:
         required: true
@@ -1706,12 +1707,10 @@ paths:
           title: Secret Name
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       responses:
         '200':
@@ -1746,12 +1745,10 @@ paths:
           title: Secret Id
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       requestBody:
         required: true
@@ -1787,12 +1784,10 @@ paths:
           title: Secret Id
       - name: workspace_id
         in: query
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            format: uuid4
-          - type: 'null'
+          type: string
+          format: uuid
           title: Workspace Id
       responses:
         '204':
@@ -2453,6 +2448,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /registry/repos/reload:
+    post:
+      tags:
+      - registry-repositories
+      summary: Reload Registry Repositories
+      description: Refresh all registry repositories.
+      operationId: registry-repositories-reload_registry_repositories
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
   /registry/repos/{repository_id}/sync:
     post:
       tags:
@@ -2460,32 +2468,6 @@ paths:
       summary: Sync Registry Repository
       description: Load actions from a specific registry repository.
       operationId: registry-repositories-sync_registry_repository
-      security:
-      - APIKeyCookie: []
-      - APIKeyHeader: []
-      parameters:
-      - name: repository_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid4
-          title: Repository Id
-      responses:
-        '204':
-          description: Successful Response
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /registry/repos/{repository_id}/sync-executor:
-    post:
-      tags:
-      - registry-repositories
-      summary: Sync Executor From Registry Repository
-      operationId: registry-repositories-sync_executor_from_registry_repository
       security:
       - APIKeyCookie: []
       - APIKeyHeader: []
@@ -2772,6 +2754,326 @@ paths:
         schema:
           type: string
           title: Action Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /settings/git:
+    get:
+      tags:
+      - settings
+      summary: Get Git Settings
+      operationId: settings-get_git_settings
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitSettingsRead'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+    patch:
+      tags:
+      - settings
+      summary: Update Git Settings
+      operationId: settings-update_git_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitSettingsUpdate'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+  /settings/saml:
+    get:
+      tags:
+      - settings
+      summary: Get Saml Settings
+      operationId: settings-get_saml_settings
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SAMLSettingsRead'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+    patch:
+      tags:
+      - settings
+      summary: Update Saml Settings
+      operationId: settings-update_saml_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SAMLSettingsUpdate'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+  /settings/auth:
+    get:
+      tags:
+      - settings
+      summary: Get Auth Settings
+      operationId: settings-get_auth_settings
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSettingsRead'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+    patch:
+      tags:
+      - settings
+      summary: Update Auth Settings
+      operationId: settings-update_auth_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthSettingsUpdate'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+  /settings/oauth:
+    get:
+      tags:
+      - settings
+      summary: Get Oauth Settings
+      operationId: settings-get_oauth_settings
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthSettingsRead'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+    patch:
+      tags:
+      - settings
+      summary: Update Oauth Settings
+      operationId: settings-update_oauth_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthSettingsUpdate'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+  /organization/secrets:
+    get:
+      tags:
+      - organization-secrets
+      summary: List Org Secrets
+      description: List organization secrets.
+      operationId: organization-secrets-list_org_secrets
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+      parameters:
+      - name: type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/SecretType'
+          - type: 'null'
+          description: Filter by secret type
+          title: Type
+        description: Filter by secret type
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SecretReadMinimal'
+                title: Response Organization-Secrets-List Org Secrets
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - organization-secrets
+      summary: Create Org Secret
+      description: Create an organization secret.
+      operationId: organization-secrets-create_org_secret
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecretCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /organization/secrets/{secret_name}:
+    get:
+      tags:
+      - organization-secrets
+      summary: Get Org Secret By Name
+      description: Get an organization secret by name.
+      operationId: organization-secrets-get_org_secret_by_name
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+      parameters:
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Secret Name
+      - name: environment
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Environment
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /organization/secrets/{secret_id}:
+    post:
+      tags:
+      - organization-secrets
+      summary: Update Org Secret By Id
+      description: Update an organization secret by ID.
+      operationId: organization-secrets-update_org_secret_by_id
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: secret-[0-9a-f]{32}
+          title: Secret Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecretUpdate'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - organization-secrets
+      summary: Delete Org Secret By Id
+      description: Delete an organization secret by ID.
+      operationId: organization-secrets-delete_org_secret_by_id
+      security:
+      - APIKeyCookie: []
+      - APIKeyHeader: []
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: secret-[0-9a-f]{32}
+          title: Secret Id
       responses:
         '204':
           description: Successful Response
@@ -3354,14 +3656,17 @@ components:
         run_if:
           anyOf:
           - type: string
+            maxLength: 1000
           - type: 'null'
           title: Run If
         for_each:
           anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
+          - anyOf:
+            - type: string
+            - items:
+                type: string
+              type: array
+            maxLength: 1000
           - type: 'null'
           title: For Each
         retry_policy:
@@ -3381,12 +3686,15 @@ components:
       properties:
         workflow_id:
           type: string
+          pattern: wf-[0-9a-f]{32}
           title: Workflow Id
         type:
           type: string
           title: Type
         title:
           type: string
+          maxLength: 100
+          minLength: 1
           title: Title
       type: object
       required:
@@ -3398,6 +3706,7 @@ components:
       properties:
         id:
           type: string
+          pattern: act-[0-9a-f]{32}
           title: Id
         type:
           type: string
@@ -3429,9 +3738,11 @@ components:
       properties:
         id:
           type: string
+          pattern: act-[0-9a-f]{32}
           title: Id
         workflow_id:
           type: string
+          pattern: wf-[0-9a-f]{32}
           title: Workflow Id
         type:
           type: string
@@ -3553,11 +3864,14 @@ components:
         title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Title
         description:
           anyOf:
           - type: string
+            maxLength: 1000
           - type: 'null'
           title: Description
         status:
@@ -3576,6 +3890,64 @@ components:
           - type: 'null'
       type: object
       title: ActionUpdate
+    AuthSettingsRead:
+      properties:
+        auth_basic_enabled:
+          type: boolean
+          title: Auth Basic Enabled
+        auth_require_email_verification:
+          type: boolean
+          title: Auth Require Email Verification
+        auth_allowed_email_domains:
+          items:
+            type: string
+          type: array
+          title: Auth Allowed Email Domains
+        auth_min_password_length:
+          type: integer
+          title: Auth Min Password Length
+        auth_session_expire_time_seconds:
+          type: integer
+          title: Auth Session Expire Time Seconds
+      type: object
+      required:
+      - auth_basic_enabled
+      - auth_require_email_verification
+      - auth_allowed_email_domains
+      - auth_min_password_length
+      - auth_session_expire_time_seconds
+      title: AuthSettingsRead
+    AuthSettingsUpdate:
+      properties:
+        auth_basic_enabled:
+          type: boolean
+          title: Auth Basic Enabled
+          description: Whether basic auth is enabled.
+          default: true
+        auth_require_email_verification:
+          type: boolean
+          title: Auth Require Email Verification
+          description: Whether email verification is required for authentication.
+          default: false
+        auth_allowed_email_domains:
+          items:
+            type: string
+          type: array
+          title: Auth Allowed Email Domains
+          description: Allowed email domains for authentication. If empty, all domains
+            are allowed.
+        auth_min_password_length:
+          type: integer
+          title: Auth Min Password Length
+          description: Minimum password length for authentication.
+          default: 12
+        auth_session_expire_time_seconds:
+          type: integer
+          title: Auth Session Expire Time Seconds
+          description: Session expiration time in seconds.
+          default: 604800
+      type: object
+      title: AuthSettingsUpdate
     Body_auth-reset_forgot_password:
       properties:
         email:
@@ -3632,11 +4004,14 @@ components:
         title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Title
         description:
           anyOf:
           - type: string
+            maxLength: 1000
           - type: 'null'
           title: Description
         file:
@@ -3647,40 +4022,6 @@ components:
           title: File
       type: object
       title: Body_workflows-create_workflow
-    CreateWorkflowExecutionParams:
-      properties:
-        workflow_id:
-          type: string
-          pattern: wf-[0-9a-f]{32}
-          title: Workflow Id
-        inputs:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Inputs
-      type: object
-      required:
-      - workflow_id
-      title: CreateWorkflowExecutionParams
-    CreateWorkflowExecutionResponse:
-      properties:
-        message:
-          type: string
-          title: Message
-        wf_id:
-          type: string
-          pattern: wf-[0-9a-f]{32}
-          title: Wf Id
-        wf_exec_id:
-          type: string
-          pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
-          title: Wf Exec Id
-      type: object
-      required:
-      - message
-      - wf_id
-      - wf_exec_id
-      title: CreateWorkflowExecutionResponse
     CreateWorkspaceMembershipParams:
       properties:
         user_id:
@@ -3695,6 +4036,8 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
+          minLength: 1
           title: Name
         settings:
           anyOf:
@@ -3955,21 +4298,14 @@ components:
         message:
           type: string
           title: Message
-        stack_trace:
-          type: string
-          title: Stack Trace
         cause:
           anyOf:
           - type: object
           - type: 'null'
           title: Cause
-        application_failure_info:
-          type: object
-          title: Application Failure Info
       type: object
       required:
       - message
-      - stack_trace
       title: EventFailure
     EventGroup:
       properties:
@@ -3991,13 +4327,19 @@ components:
           - type: 'null'
           title: Action Id
         action_ref:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Action Ref
         action_title:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Action Title
         action_description:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Action Description
         action_input:
           anyOf:
@@ -4037,84 +4379,8 @@ components:
       - udf_namespace
       - udf_name
       - udf_key
-      - action_id
-      - action_ref
-      - action_title
-      - action_description
       - action_input
       title: EventGroup
-    EventHistoryResponse:
-      properties:
-        event_id:
-          type: integer
-          title: Event Id
-        event_time:
-          type: string
-          format: date-time
-          title: Event Time
-        event_type:
-          $ref: '#/components/schemas/EventHistoryType'
-        task_id:
-          type: integer
-          title: Task Id
-        event_group:
-          anyOf:
-          - $ref: '#/components/schemas/EventGroup'
-          - type: 'null'
-          description: The action group of the event. We use this to keep track of
-            what events are related to each other.
-        failure:
-          anyOf:
-          - $ref: '#/components/schemas/EventFailure'
-          - type: 'null'
-        result:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Result
-        role:
-          anyOf:
-          - $ref: '#/components/schemas/Role'
-          - type: 'null'
-        parent_wf_exec_id:
-          anyOf:
-          - type: string
-            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
-          - type: 'null'
-          title: Parent Wf Exec Id
-        workflow_timeout:
-          anyOf:
-          - type: number
-          - type: 'null'
-          title: Workflow Timeout
-      type: object
-      required:
-      - event_id
-      - event_time
-      - event_type
-      - task_id
-      title: EventHistoryResponse
-    EventHistoryType:
-      type: string
-      enum:
-      - WORKFLOW_EXECUTION_STARTED
-      - WORKFLOW_EXECUTION_COMPLETED
-      - WORKFLOW_EXECUTION_FAILED
-      - WORKFLOW_EXECUTION_TERMINATED
-      - WORKFLOW_EXECUTION_CANCELED
-      - WORKFLOW_EXECUTION_CONTINUED_AS_NEW
-      - WORKFLOW_EXECUTION_TIMED_OUT
-      - ACTIVITY_TASK_SCHEDULED
-      - ACTIVITY_TASK_STARTED
-      - ACTIVITY_TASK_COMPLETED
-      - ACTIVITY_TASK_FAILED
-      - ACTIVITY_TASK_TIMED_OUT
-      - CHILD_WORKFLOW_EXECUTION_STARTED
-      - CHILD_WORKFLOW_EXECUTION_COMPLETED
-      - CHILD_WORKFLOW_EXECUTION_FAILED
-      - START_CHILD_WORKFLOW_EXECUTION_INITIATED
-      title: EventHistoryType
-      description: The event types we care about.
     ExpectedField:
       properties:
         type:
@@ -4170,6 +4436,47 @@ components:
       - role
       - workflow_id
       title: GetWorkflowDefinitionActivityInputs
+    GitSettingsRead:
+      properties:
+        git_allowed_domains:
+          items:
+            type: string
+          type: array
+          title: Git Allowed Domains
+        git_repo_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Git Repo Url
+        git_repo_package_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Git Repo Package Name
+      type: object
+      required:
+      - git_allowed_domains
+      title: GitSettingsRead
+    GitSettingsUpdate:
+      properties:
+        git_allowed_domains:
+          items:
+            type: string
+          type: array
+          title: Git Allowed Domains
+          description: Allowed git domains for authentication.
+        git_repo_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Git Repo Url
+        git_repo_package_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Git Repo Package Name
+      type: object
+      title: GitSettingsUpdate
     HTTPValidationError:
       properties:
         detail:
@@ -4194,6 +4501,26 @@ components:
       required:
       - authorization_url
       title: OAuth2AuthorizeResponse
+    OAuthSettingsRead:
+      properties:
+        oauth_google_enabled:
+          type: boolean
+          title: Oauth Google Enabled
+      type: object
+      required:
+      - oauth_google_enabled
+      title: OAuthSettingsRead
+      description: Settings for OAuth authentication.
+    OAuthSettingsUpdate:
+      properties:
+        oauth_google_enabled:
+          type: boolean
+          title: Oauth Google Enabled
+          description: Whether OAuth is enabled.
+          default: true
+      type: object
+      title: OAuthSettingsUpdate
+      description: Settings for OAuth authentication.
     OrgMemberRead:
       properties:
         user_id:
@@ -4247,10 +4574,13 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
+          minLength: 1
           title: Name
           description: The name of the action
         description:
           type: string
+          maxLength: 1000
           title: Description
           description: The description of the action
         namespace:
@@ -4266,6 +4596,8 @@ components:
           description: The type of the action
         origin:
           type: string
+          maxLength: 1000
+          minLength: 1
           title: Origin
           description: The origin of the action as a url
         secrets:
@@ -4286,27 +4618,43 @@ components:
         default_title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Default Title
           description: The default title of the action
         display_group:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Display Group
           description: The presentation group of the action
         doc_url:
           anyOf:
           - type: string
+            maxLength: 1000
+            minLength: 1
           - type: 'null'
           title: Doc Url
           description: Link to documentation
         author:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Author
           description: Author of the action
+        deprecated:
+          anyOf:
+          - type: string
+            maxLength: 1000
+            minLength: 1
+          - type: 'null'
+          title: Deprecated
+          description: Marks action as deprecated along with message
         options:
           allOf:
           - $ref: '#/components/schemas/RegistryActionOptions'
@@ -4351,10 +4699,13 @@ components:
       properties:
         name:
           type: string
+          maxLength: 100
+          minLength: 1
           title: Name
           description: The name of the action
         description:
           type: string
+          maxLength: 1000
           title: Description
           description: The description of the action
         namespace:
@@ -4370,6 +4721,8 @@ components:
           description: The type of the action
         origin:
           type: string
+          maxLength: 1000
+          minLength: 1
           title: Origin
           description: The origin of the action as a url
         secrets:
@@ -4390,27 +4743,43 @@ components:
         default_title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Default Title
           description: The default title of the action
         display_group:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Display Group
           description: The presentation group of the action
         doc_url:
           anyOf:
           - type: string
+            maxLength: 1000
+            minLength: 1
           - type: 'null'
           title: Doc Url
           description: Link to documentation
         author:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Author
           description: Author of the action
+        deprecated:
+          anyOf:
+          - type: string
+            maxLength: 1000
+            minLength: 1
+          - type: 'null'
+          title: Deprecated
+          description: Marks action as deprecated along with message
         options:
           allOf:
           - $ref: '#/components/schemas/RegistryActionOptions'
@@ -4500,12 +4869,15 @@ components:
         name:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Name
           description: Update the name of the action
         description:
           anyOf:
           - type: string
+            maxLength: 1000
           - type: 'null'
           title: Description
           description: Update the description of the action
@@ -4532,27 +4904,43 @@ components:
         default_title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Default Title
           description: Update the default title of the action
         display_group:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Display Group
           description: Update the display group of the action
         doc_url:
           anyOf:
           - type: string
+            maxLength: 1000
+            minLength: 1
           - type: 'null'
           title: Doc Url
           description: Update the doc url of the action
         author:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Author
           description: Update the author of the action
+        deprecated:
+          anyOf:
+          - type: string
+            maxLength: 1000
+            minLength: 1
+          - type: 'null'
+          title: Deprecated
+          description: Update the deprecation message of the action
         options:
           anyOf:
           - $ref: '#/components/schemas/RegistryActionOptions'
@@ -4588,7 +4976,10 @@ components:
       properties:
         origin:
           type: string
+          maxLength: 255
+          minLength: 1
           title: Origin
+          description: The origin of the repository
       type: object
       required:
       - origin
@@ -4664,13 +5055,19 @@ components:
         commit_sha:
           anyOf:
           - type: string
+            maxLength: 255
+            minLength: 1
           - type: 'null'
           title: Commit Sha
+          description: The commit SHA of the repository
         origin:
           anyOf:
           - type: string
+            maxLength: 255
+            minLength: 1
           - type: 'null'
           title: Origin
+          description: The origin of the repository
       type: object
       title: RegistryRepositoryUpdate
     RegistrySecret:
@@ -4736,6 +5133,7 @@ components:
           - tracecat-schedule-runner
           - tracecat-service
           - tracecat-executor
+          - tracecat-bootstrap
           title: Service Id
       type: object
       required:
@@ -4804,6 +5202,48 @@ components:
       required:
       - redirect_url
       title: SAMLDatabaseLoginResponse
+    SAMLSettingsRead:
+      properties:
+        saml_enabled:
+          type: boolean
+          title: Saml Enabled
+        saml_enforced:
+          type: boolean
+          title: Saml Enforced
+        saml_idp_metadata_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Saml Idp Metadata Url
+        saml_sp_acs_url:
+          type: string
+          title: Saml Sp Acs Url
+      type: object
+      required:
+      - saml_enabled
+      - saml_enforced
+      - saml_sp_acs_url
+      title: SAMLSettingsRead
+    SAMLSettingsUpdate:
+      properties:
+        saml_enabled:
+          type: boolean
+          title: Saml Enabled
+          description: Whether SAML is enabled.
+          default: false
+        saml_enforced:
+          type: boolean
+          title: Saml Enforced
+          description: Whether SAML is enforced. If true, users can only use SAML
+            to authenticate. Requires SAML to be enabled.
+          default: false
+        saml_idp_metadata_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Saml Idp Metadata Url
+      type: object
+      title: SAMLSettingsUpdate
     Schedule:
       properties:
         owner_id:
@@ -5027,16 +5467,22 @@ components:
           default: custom
         name:
           type: string
+          maxLength: 100
+          minLength: 1
           title: Name
         description:
           anyOf:
           - type: string
+            maxLength: 1000
+            minLength: 0
           - type: 'null'
           title: Description
         keys:
           items:
             $ref: '#/components/schemas/SecretKeyValue'
           type: array
+          maxItems: 100
+          minItems: 1
           title: Keys
         tags:
           anyOf:
@@ -5081,13 +5527,6 @@ components:
       - key
       - value
       title: SecretKeyValue
-    SecretLevel:
-      type: string
-      enum:
-      - workspace
-      - organization
-      title: SecretLevel
-      description: The level of a secret.
     SecretRead:
       properties:
         id:
@@ -5187,11 +5626,15 @@ components:
         name:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Name
         description:
           anyOf:
           - type: string
+            maxLength: 1000
+            minLength: 0
           - type: 'null'
           title: Description
         keys:
@@ -5199,6 +5642,8 @@ components:
           - items:
               $ref: '#/components/schemas/SecretKeyValue'
             type: array
+            maxItems: 100
+            minItems: 1
           - type: 'null'
           title: Keys
         tags:
@@ -5206,17 +5651,17 @@ components:
           - additionalProperties:
               type: string
             type: object
+            maxProperties: 1000
+            minProperties: 0
           - type: 'null'
           title: Tags
         environment:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Environment
-        level:
-          anyOf:
-          - $ref: '#/components/schemas/SecretLevel'
-          - type: 'null'
       type: object
       title: SecretUpdate
       description: 'Update a secret.
@@ -5256,20 +5701,29 @@ components:
       - user_id
       - user_email
       title: SessionRead
+    SpecialUserID:
+      type: string
+      const: current
+      title: SpecialUserID
+      description: A sentinel user ID that represents the current user.
     TagCreate:
       properties:
         name:
           type: string
+          maxLength: 50
+          minLength: 1
           title: Name
         color:
           anyOf:
           - type: string
           - type: 'null'
           title: Color
+          description: Hex color code
       type: object
       required:
       - name
       title: TagCreate
+      description: Model for creating new tags with validation.
     TagRead:
       properties:
         id:
@@ -5278,22 +5732,28 @@ components:
           title: Id
         name:
           type: string
+          maxLength: 50
+          minLength: 1
           title: Name
         color:
           anyOf:
           - type: string
           - type: 'null'
           title: Color
+          description: Hex color code
       type: object
       required:
       - id
       - name
       title: TagRead
+      description: Model for reading tag data with validation.
     TagUpdate:
       properties:
         name:
           anyOf:
           - type: string
+            maxLength: 50
+            minLength: 1
           - type: 'null'
           title: Name
         color:
@@ -5301,8 +5761,10 @@ components:
           - type: string
           - type: 'null'
           title: Color
+          description: Hex color code
       type: object
       title: TagUpdate
+      description: Model for updating existing tags with validation.
     TemplateAction-Input:
       properties:
         type:
@@ -5362,6 +5824,12 @@ components:
           - type: 'null'
           title: Author
           description: Author of the action
+        deprecated:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Deprecated
+          description: Marks action as deprecated along with message
         secrets:
           anyOf:
           - items:
@@ -5401,15 +5869,6 @@ components:
       - steps
       - returns
       title: TemplateActionDefinition
-    TerminateWorkflowExecutionParams:
-      properties:
-        reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Reason
-      type: object
-      title: TerminateWorkflowExecutionParams
     Trigger:
       properties:
         type:
@@ -5430,11 +5889,21 @@ components:
       - type
       - ref
       title: Trigger
+    TriggerType:
+      type: string
+      enum:
+      - manual
+      - scheduled
+      - webhook
+      title: TriggerType
+      description: Trigger type for a workflow execution.
     UpdateWorkspaceParams:
       properties:
         name:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 1
           - type: 'null'
           title: Name
         settings:
@@ -5792,7 +6261,186 @@ components:
         -------------
 
         - 1 Workflow to many WorkflowDefinitions'
-    WorkflowExecutionResponse:
+    WorkflowEventType:
+      type: string
+      enum:
+      - WORKFLOW_EXECUTION_STARTED
+      - WORKFLOW_EXECUTION_COMPLETED
+      - WORKFLOW_EXECUTION_FAILED
+      - WORKFLOW_EXECUTION_TERMINATED
+      - WORKFLOW_EXECUTION_CANCELED
+      - WORKFLOW_EXECUTION_CONTINUED_AS_NEW
+      - WORKFLOW_EXECUTION_TIMED_OUT
+      - ACTIVITY_TASK_SCHEDULED
+      - ACTIVITY_TASK_STARTED
+      - ACTIVITY_TASK_COMPLETED
+      - ACTIVITY_TASK_FAILED
+      - ACTIVITY_TASK_TIMED_OUT
+      - ACTIVITY_TASK_CANCELED
+      - CHILD_WORKFLOW_EXECUTION_STARTED
+      - CHILD_WORKFLOW_EXECUTION_COMPLETED
+      - CHILD_WORKFLOW_EXECUTION_FAILED
+      - CHILD_WORKFLOW_EXECUTION_CANCELED
+      - CHILD_WORKFLOW_EXECUTION_TERMINATED
+      - START_CHILD_WORKFLOW_EXECUTION_INITIATED
+      - CHILD_WORKFLOW_EXECUTION_TIMED_OUT
+      title: WorkflowEventType
+      description: The event types we care about.
+    WorkflowExecutionCreate:
+      properties:
+        workflow_id:
+          type: string
+          pattern: wf-[0-9a-f]{32}
+          title: Workflow Id
+        inputs:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Inputs
+      type: object
+      required:
+      - workflow_id
+      title: WorkflowExecutionCreate
+    WorkflowExecutionCreateResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+        wf_id:
+          type: string
+          pattern: wf-[0-9a-f]{32}
+          title: Wf Id
+        wf_exec_id:
+          type: string
+          pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          title: Wf Exec Id
+      type: object
+      required:
+      - message
+      - wf_id
+      - wf_exec_id
+      title: WorkflowExecutionCreateResponse
+    WorkflowExecutionEvent:
+      properties:
+        event_id:
+          type: integer
+          title: Event Id
+        event_time:
+          type: string
+          format: date-time
+          title: Event Time
+        event_type:
+          $ref: '#/components/schemas/WorkflowEventType'
+        task_id:
+          type: integer
+          title: Task Id
+        event_group:
+          anyOf:
+          - $ref: '#/components/schemas/EventGroup'
+          - type: 'null'
+          description: The action group of the event. We use this to keep track of
+            what events are related to each other.
+        failure:
+          anyOf:
+          - $ref: '#/components/schemas/EventFailure'
+          - type: 'null'
+        result:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Result
+        role:
+          anyOf:
+          - $ref: '#/components/schemas/Role'
+          - type: 'null'
+        parent_wf_exec_id:
+          anyOf:
+          - type: string
+            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          - type: 'null'
+          title: Parent Wf Exec Id
+        workflow_timeout:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Workflow Timeout
+      type: object
+      required:
+      - event_id
+      - event_time
+      - event_type
+      - task_id
+      title: WorkflowExecutionEvent
+    WorkflowExecutionEventCompact:
+      properties:
+        source_event_id:
+          type: integer
+          title: Source Event Id
+        schedule_time:
+          type: string
+          format: date-time
+          title: Schedule Time
+        start_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start Time
+        close_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Close Time
+        curr_event_type:
+          $ref: '#/components/schemas/WorkflowEventType'
+        status:
+          $ref: '#/components/schemas/WorkflowExecutionEventStatus'
+        action_name:
+          type: string
+          title: Action Name
+        action_ref:
+          type: string
+          title: Action Ref
+        action_input:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Action Input
+        action_result:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Action Result
+        child_wf_exec_id:
+          anyOf:
+          - type: string
+            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          - type: 'null'
+          title: Child Wf Exec Id
+      type: object
+      required:
+      - source_event_id
+      - schedule_time
+      - curr_event_type
+      - status
+      - action_name
+      - action_ref
+      title: WorkflowExecutionEventCompact
+      description: A compact representation of a workflow execution event.
+    WorkflowExecutionEventStatus:
+      type: string
+      enum:
+      - SCHEDULED
+      - STARTED
+      - COMPLETED
+      - FAILED
+      - CANCELED
+      - TERMINATED
+      - TIMED_OUT
+      - UNKNOWN
+      title: WorkflowExecutionEventStatus
+    WorkflowExecutionRead:
       properties:
         id:
           type: string
@@ -5841,6 +6489,18 @@ components:
           type: integer
           title: History Length
           description: Number of events in the history
+        parent_wf_exec_id:
+          anyOf:
+          - type: string
+            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          - type: 'null'
+          title: Parent Wf Exec Id
+        events:
+          items:
+            $ref: '#/components/schemas/WorkflowExecutionEvent'
+          type: array
+          title: Events
+          description: The events in the workflow execution
       type: object
       required:
       - id
@@ -5850,7 +6510,154 @@ components:
       - workflow_type
       - task_queue
       - history_length
-      title: WorkflowExecutionResponse
+      - events
+      title: WorkflowExecutionRead
+    WorkflowExecutionReadCompact:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The ID of the workflow execution
+        run_id:
+          type: string
+          title: Run Id
+          description: The run ID of the workflow execution
+        start_time:
+          type: string
+          format: date-time
+          title: Start Time
+          description: The start time of the workflow execution
+        execution_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Execution Time
+          description: When this workflow run started or should start.
+        close_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Close Time
+          description: When the workflow was closed if closed.
+        status:
+          type: string
+          enum:
+          - RUNNING
+          - COMPLETED
+          - FAILED
+          - CANCELED
+          - TERMINATED
+          - CONTINUED_AS_NEW
+          - TIMED_OUT
+        workflow_type:
+          type: string
+          title: Workflow Type
+        task_queue:
+          type: string
+          title: Task Queue
+        history_length:
+          type: integer
+          title: History Length
+          description: Number of events in the history
+        parent_wf_exec_id:
+          anyOf:
+          - type: string
+            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          - type: 'null'
+          title: Parent Wf Exec Id
+        events:
+          items:
+            $ref: '#/components/schemas/WorkflowExecutionEventCompact'
+          type: array
+          title: Events
+          description: Compact events in the workflow execution
+      type: object
+      required:
+      - id
+      - run_id
+      - start_time
+      - status
+      - workflow_type
+      - task_queue
+      - history_length
+      - events
+      title: WorkflowExecutionReadCompact
+    WorkflowExecutionReadMinimal:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The ID of the workflow execution
+        run_id:
+          type: string
+          title: Run Id
+          description: The run ID of the workflow execution
+        start_time:
+          type: string
+          format: date-time
+          title: Start Time
+          description: The start time of the workflow execution
+        execution_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Execution Time
+          description: When this workflow run started or should start.
+        close_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Close Time
+          description: When the workflow was closed if closed.
+        status:
+          type: string
+          enum:
+          - RUNNING
+          - COMPLETED
+          - FAILED
+          - CANCELED
+          - TERMINATED
+          - CONTINUED_AS_NEW
+          - TIMED_OUT
+        workflow_type:
+          type: string
+          title: Workflow Type
+        task_queue:
+          type: string
+          title: Task Queue
+        history_length:
+          type: integer
+          title: History Length
+          description: Number of events in the history
+        parent_wf_exec_id:
+          anyOf:
+          - type: string
+            pattern: wf-[0-9a-f]{32}:(exec-[\w-]+|sch-[0-9a-f]{32}-.*)
+          - type: 'null'
+          title: Parent Wf Exec Id
+      type: object
+      required:
+      - id
+      - run_id
+      - start_time
+      - status
+      - workflow_type
+      - task_queue
+      - history_length
+      title: WorkflowExecutionReadMinimal
+    WorkflowExecutionTerminate:
+      properties:
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      title: WorkflowExecutionTerminate
     WorkflowRead:
       properties:
         id:
@@ -6015,13 +6822,18 @@ components:
         title:
           anyOf:
           - type: string
+            maxLength: 100
+            minLength: 3
           - type: 'null'
           title: Title
+          description: Workflow title, between 3 and 100 characters
         description:
           anyOf:
           - type: string
+            maxLength: 1000
           - type: 'null'
           title: Description
+          description: Optional workflow description, up to 1000 characters
         status:
           anyOf:
           - type: string

@@ -3,11 +3,8 @@
 import React from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import {
-  ApiError,
-  RegistryActionValidateResponse,
-  workflowExecutionsCreateWorkflowExecution,
-} from "@/client"
+import { ApiError, RegistryActionValidateResponse } from "@/client"
+import { useWorkflowBuilder } from "@/providers/builder"
 import { useWorkflow } from "@/providers/workflow"
 import { useWorkspace } from "@/providers/workspace"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -18,7 +15,6 @@ import {
   PlayIcon,
   SaveIcon,
   SquarePlay,
-  Trash2Icon,
   WorkflowIcon,
 } from "lucide-react"
 import { useForm } from "react-hook-form"
@@ -27,7 +23,7 @@ import { z } from "zod"
 
 import { TracecatApiError } from "@/lib/errors"
 import { exportWorkflow, handleExportError } from "@/lib/export"
-import { useWorkflowManager } from "@/lib/hooks"
+import { useManualWorkflowExecution, useWorkflowManager } from "@/lib/hooks"
 import { cn } from "@/lib/utils"
 import {
   AlertDialog,
@@ -49,16 +45,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -369,6 +356,8 @@ function WorkflowManualTrigger({
   disabled: boolean
   workflowId: string
 }) {
+  const { expandSidebarAndFocusEvents } = useWorkflowBuilder()
+  const { createExecution } = useManualWorkflowExecution(workflowId)
   const [open, setOpen] = React.useState(false)
   const { workspaceId } = useWorkspace()
   const [lastTriggerInput, setLastTriggerInput] = React.useState<string | null>(
@@ -391,13 +380,12 @@ function WorkflowManualTrigger({
     setLastTriggerInput(payload)
     setManualTriggerErrors(null)
     try {
-      const response = await workflowExecutionsCreateWorkflowExecution({
-        workspaceId,
-        requestBody: {
-          workflow_id: workflowId,
-          inputs: payload ? JSON.parse(payload) : undefined,
-        },
+      const response = await createExecution({
+        workflow_id: workflowId,
+        inputs: payload ? JSON.parse(payload) : undefined,
       })
+      // Maybe add setting to control this behavior
+      expandSidebarAndFocusEvents()
       console.log("Workflow started", response)
       toast({
         title: `Workflow run started`,
@@ -605,34 +593,8 @@ function WorkbenchNavOptions({
               <DownloadIcon className="mr-2 size-4" />
               <span>Export as YAML</span>
             </DropdownMenuItem>
-            <DialogTrigger asChild>
-              <DropdownMenuItem className="text-xs text-red-600">
-                <Trash2Icon className="mr-2 size-4" />
-                <span>Delete</span>
-              </DropdownMenuItem>
-            </DialogTrigger>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete workflow</DialogTitle>
-            <DialogClose />
-          </DialogHeader>
-          <DialogDescription>
-            Are you sure you want to permanently delete this workflow?
-          </DialogDescription>
-          <DialogFooter>
-            <Button variant="outline">Cancel</Button>
-            <Button
-              onClick={handleDeleteWorkflow}
-              variant="destructive"
-              className="mr-2"
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
       </Dialog>
     </>
   )

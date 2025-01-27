@@ -98,15 +98,10 @@ OAUTH_CLIENT_SECRET = (
 USER_AUTH_SECRET = os.environ.get("USER_AUTH_SECRET", "")
 
 # SAML SSO
-SAML_IDP_CERTIFICATE = os.environ.get("SAML_IDP_CERTIFICATE")
-"""Deprecated: This config has been removed"""
+
+SAML_PUBLIC_ACS_URL = f"{TRACECAT__PUBLIC_APP_URL}/auth/saml/acs"
 
 SAML_IDP_METADATA_URL = os.environ.get("SAML_IDP_METADATA_URL")
-"""Deprecated: This config has been moved into the settings service"""
-
-SAML_SP_ACS_URL = os.environ.get(
-    "SAML_SP_ACS_URL", "http://localhost/api/auth/saml/acs"
-)
 """Deprecated: This config has been moved into the settings service"""
 
 XMLSEC_BINARY_PATH = os.environ.get("XMLSEC_BINARY_PATH", "/usr/bin/xmlsec1")
@@ -128,6 +123,7 @@ TEMPORAL__CLUSTER_QUEUE = os.environ.get(
     "TEMPORAL__CLUSTER_QUEUE", "tracecat-task-queue"
 )
 TEMPORAL__API_KEY__ARN = os.environ.get("TEMPORAL__API_KEY__ARN")
+TEMPORAL__API_KEY = os.environ.get("TEMPORAL__API_KEY")
 TEMPORAL__MTLS_ENABLED = os.environ.get("TEMPORAL__MTLS_ENABLED", "").lower() in (
     "1",
     "true",

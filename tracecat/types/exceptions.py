@@ -21,7 +21,7 @@ class TracecatException(Exception):
 
 
 class TracecatValidationError(TracecatException):
-    """Tracecat user-facting validation error"""
+    """Tracecat user-facing validation error"""
 
 
 class TracecatDSLError(TracecatValidationError):
@@ -92,3 +92,7 @@ class WrappedExecutionError(TracecatException):
 
     def __init__(self, error: Any):
         self.error = error
+
+
+class TracecatSettingsError(TracecatException):
+    """Exception raised when a setting error occurs."""

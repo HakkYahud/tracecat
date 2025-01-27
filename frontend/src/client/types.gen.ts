@@ -175,17 +175,6 @@ export type Body_workflows_create_workflow = {
   file?: (Blob | File) | null
 }
 
-export type CreateWorkflowExecutionParams = {
-  workflow_id: string
-  inputs?: unknown | null
-}
-
-export type CreateWorkflowExecutionResponse = {
-  message: string
-  wf_id: string
-  wf_exec_id: string
-}
-
 export type CreateWorkspaceMembershipParams = {
   user_id: string
 }
@@ -360,43 +349,6 @@ export type EventGroup = {
   related_wf_exec_id?: string | null
 }
 
-export type EventHistoryResponse = {
-  event_id: number
-  event_time: string
-  event_type: EventHistoryType
-  task_id: number
-  /**
-   * The action group of the event. We use this to keep track of what events are related to each other.
-   */
-  event_group?: EventGroup | null
-  failure?: EventFailure | null
-  result?: unknown | null
-  role?: Role | null
-  parent_wf_exec_id?: string | null
-  workflow_timeout?: number | null
-}
-
-/**
- * The event types we care about.
- */
-export type EventHistoryType =
-  | "WORKFLOW_EXECUTION_STARTED"
-  | "WORKFLOW_EXECUTION_COMPLETED"
-  | "WORKFLOW_EXECUTION_FAILED"
-  | "WORKFLOW_EXECUTION_TERMINATED"
-  | "WORKFLOW_EXECUTION_CANCELED"
-  | "WORKFLOW_EXECUTION_CONTINUED_AS_NEW"
-  | "WORKFLOW_EXECUTION_TIMED_OUT"
-  | "ACTIVITY_TASK_SCHEDULED"
-  | "ACTIVITY_TASK_STARTED"
-  | "ACTIVITY_TASK_COMPLETED"
-  | "ACTIVITY_TASK_FAILED"
-  | "ACTIVITY_TASK_TIMED_OUT"
-  | "CHILD_WORKFLOW_EXECUTION_STARTED"
-  | "CHILD_WORKFLOW_EXECUTION_COMPLETED"
-  | "CHILD_WORKFLOW_EXECUTION_FAILED"
-  | "START_CHILD_WORKFLOW_EXECUTION_INITIATED"
-
 export type ExpectedField = {
   type: string
   description?: string | null
@@ -525,6 +477,10 @@ export type RegistryActionCreate = {
    */
   author?: string | null
   /**
+   * Marks action as deprecated along with message
+   */
+  deprecated?: string | null
+  /**
    * The options for the action
    */
   options?: RegistryActionOptions
@@ -596,6 +552,10 @@ export type RegistryActionRead = {
    * Author of the action
    */
   author?: string | null
+  /**
+   * Marks action as deprecated along with message
+   */
+  deprecated?: string | null
   /**
    * The options for the action
    */
@@ -690,6 +650,10 @@ export type RegistryActionUpdate = {
    */
   author?: string | null
   /**
+   * Update the deprecation message of the action
+   */
+  deprecated?: string | null
+  /**
    * Update the options of the action
    */
   options?: RegistryActionOptions | null
@@ -781,6 +745,7 @@ export type Role = {
     | "tracecat-schedule-runner"
     | "tracecat-service"
     | "tracecat-executor"
+    | "tracecat-bootstrap"
 }
 
 export type type2 = "user" | "service"
@@ -792,6 +757,7 @@ export type service_id =
   | "tracecat-schedule-runner"
   | "tracecat-service"
   | "tracecat-executor"
+  | "tracecat-bootstrap"
 
 /**
  * This object contains all the information needed to execute an action.
@@ -867,7 +833,7 @@ export type Schedule = {
    * The maximum number of seconds to wait for the workflow to complete
    */
   timeout?: number | null
-  workflow_id: string | null
+  workflow_id: string
 }
 
 export type ScheduleCreate = {
@@ -1016,6 +982,11 @@ export type SessionRead = {
 }
 
 /**
+ * A sentinel user ID that represents the current user.
+ */
+export type SpecialUserID = "current"
+
+/**
  * Model for creating new tags with validation.
  */
 export type TagCreate = {
@@ -1089,6 +1060,10 @@ export type TemplateActionDefinition = {
    */
   author?: string | null
   /**
+   * Marks action as deprecated along with message
+   */
+  deprecated?: string | null
+  /**
    * The secrets to pass to the action
    */
   secrets?: Array<RegistrySecret> | null
@@ -1113,10 +1088,6 @@ export type TemplateActionDefinition = {
       }
 }
 
-export type TerminateWorkflowExecutionParams = {
-  reason?: string | null
-}
-
 export type Trigger = {
   type: "schedule" | "webhook"
   ref: string
@@ -1126,6 +1097,11 @@ export type Trigger = {
 }
 
 export type type3 = "schedule" | "webhook"
+
+/**
+ * Trigger type for a workflow execution.
+ */
+export type TriggerType = "manual" | "scheduled" | "webhook"
 
 export type UpdateWorkspaceParams = {
   name?: string | null
@@ -1252,7 +1228,87 @@ export type WorkflowDefinition = {
   }
 }
 
-export type WorkflowExecutionResponse = {
+/**
+ * The event types we care about.
+ */
+export type WorkflowEventType =
+  | "WORKFLOW_EXECUTION_STARTED"
+  | "WORKFLOW_EXECUTION_COMPLETED"
+  | "WORKFLOW_EXECUTION_FAILED"
+  | "WORKFLOW_EXECUTION_TERMINATED"
+  | "WORKFLOW_EXECUTION_CANCELED"
+  | "WORKFLOW_EXECUTION_CONTINUED_AS_NEW"
+  | "WORKFLOW_EXECUTION_TIMED_OUT"
+  | "ACTIVITY_TASK_SCHEDULED"
+  | "ACTIVITY_TASK_STARTED"
+  | "ACTIVITY_TASK_COMPLETED"
+  | "ACTIVITY_TASK_FAILED"
+  | "ACTIVITY_TASK_TIMED_OUT"
+  | "ACTIVITY_TASK_CANCELED"
+  | "CHILD_WORKFLOW_EXECUTION_STARTED"
+  | "CHILD_WORKFLOW_EXECUTION_COMPLETED"
+  | "CHILD_WORKFLOW_EXECUTION_FAILED"
+  | "CHILD_WORKFLOW_EXECUTION_CANCELED"
+  | "CHILD_WORKFLOW_EXECUTION_TERMINATED"
+  | "START_CHILD_WORKFLOW_EXECUTION_INITIATED"
+  | "CHILD_WORKFLOW_EXECUTION_TIMED_OUT"
+
+export type WorkflowExecutionCreate = {
+  workflow_id: string
+  inputs?: unknown | null
+}
+
+export type WorkflowExecutionCreateResponse = {
+  message: string
+  wf_id: string
+  wf_exec_id: string
+}
+
+export type WorkflowExecutionEvent = {
+  event_id: number
+  event_time: string
+  event_type: WorkflowEventType
+  task_id: number
+  /**
+   * The action group of the event. We use this to keep track of what events are related to each other.
+   */
+  event_group?: EventGroup | null
+  failure?: EventFailure | null
+  result?: unknown | null
+  role?: Role | null
+  parent_wf_exec_id?: string | null
+  workflow_timeout?: number | null
+}
+
+/**
+ * A compact representation of a workflow execution event.
+ */
+export type WorkflowExecutionEventCompact = {
+  source_event_id: number
+  schedule_time: string
+  start_time?: string | null
+  close_time?: string | null
+  curr_event_type: WorkflowEventType
+  status: WorkflowExecutionEventStatus
+  action_name: string
+  action_ref: string
+  action_input?: unknown | null
+  action_result?: unknown | null
+  action_error?: EventFailure | null
+  child_wf_exec_id?: string | null
+}
+
+export type WorkflowExecutionEventStatus =
+  | "SCHEDULED"
+  | "STARTED"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELED"
+  | "TERMINATED"
+  | "TIMED_OUT"
+  | "UNKNOWN"
+
+export type WorkflowExecutionRead = {
   /**
    * The ID of the workflow execution
    */
@@ -1287,6 +1343,11 @@ export type WorkflowExecutionResponse = {
    * Number of events in the history
    */
   history_length: number
+  parent_wf_exec_id?: string | null
+  /**
+   * The events in the workflow execution
+   */
+  events: Array<WorkflowExecutionEvent>
 }
 
 export type status3 =
@@ -1297,6 +1358,90 @@ export type status3 =
   | "TERMINATED"
   | "CONTINUED_AS_NEW"
   | "TIMED_OUT"
+
+export type WorkflowExecutionReadCompact = {
+  /**
+   * The ID of the workflow execution
+   */
+  id: string
+  /**
+   * The run ID of the workflow execution
+   */
+  run_id: string
+  /**
+   * The start time of the workflow execution
+   */
+  start_time: string
+  /**
+   * When this workflow run started or should start.
+   */
+  execution_time?: string | null
+  /**
+   * When the workflow was closed if closed.
+   */
+  close_time?: string | null
+  status:
+    | "RUNNING"
+    | "COMPLETED"
+    | "FAILED"
+    | "CANCELED"
+    | "TERMINATED"
+    | "CONTINUED_AS_NEW"
+    | "TIMED_OUT"
+  workflow_type: string
+  task_queue: string
+  /**
+   * Number of events in the history
+   */
+  history_length: number
+  parent_wf_exec_id?: string | null
+  /**
+   * Compact events in the workflow execution
+   */
+  events: Array<WorkflowExecutionEventCompact>
+}
+
+export type WorkflowExecutionReadMinimal = {
+  /**
+   * The ID of the workflow execution
+   */
+  id: string
+  /**
+   * The run ID of the workflow execution
+   */
+  run_id: string
+  /**
+   * The start time of the workflow execution
+   */
+  start_time: string
+  /**
+   * When this workflow run started or should start.
+   */
+  execution_time?: string | null
+  /**
+   * When the workflow was closed if closed.
+   */
+  close_time?: string | null
+  status:
+    | "RUNNING"
+    | "COMPLETED"
+    | "FAILED"
+    | "CANCELED"
+    | "TERMINATED"
+    | "CONTINUED_AS_NEW"
+    | "TIMED_OUT"
+  workflow_type: string
+  task_queue: string
+  /**
+   * Number of events in the history
+   */
+  history_length: number
+  parent_wf_exec_id?: string | null
+}
+
+export type WorkflowExecutionTerminate = {
+  reason?: string | null
+}
 
 export type WorkflowRead = {
   id: string
@@ -1413,16 +1558,16 @@ export type login = {
 
 export type PublicIncomingWebhookData = {
   contentType?: string | null
-  path: string
   secret: string
+  workflowId: string
 }
 
-export type PublicIncomingWebhookResponse = CreateWorkflowExecutionResponse
+export type PublicIncomingWebhookResponse = WorkflowExecutionCreateResponse
 
 export type PublicIncomingWebhookWaitData = {
   contentType?: string | null
-  path: string
   secret: string
+  workflowId: string
 }
 
 export type PublicIncomingWebhookWaitResponse = unknown
@@ -1590,20 +1735,23 @@ export type TriggersUpdateWebhookData = {
 export type TriggersUpdateWebhookResponse = void
 
 export type WorkflowExecutionsListWorkflowExecutionsData = {
+  limit?: number | null
+  trigger?: Array<TriggerType> | null
+  userId?: string | SpecialUserID | null
   workflowId?: string | null
   workspaceId: string
 }
 
 export type WorkflowExecutionsListWorkflowExecutionsResponse =
-  Array<WorkflowExecutionResponse>
+  Array<WorkflowExecutionReadMinimal>
 
 export type WorkflowExecutionsCreateWorkflowExecutionData = {
-  requestBody: CreateWorkflowExecutionParams
+  requestBody: WorkflowExecutionCreate
   workspaceId: string
 }
 
 export type WorkflowExecutionsCreateWorkflowExecutionResponse =
-  CreateWorkflowExecutionResponse
+  WorkflowExecutionCreateResponse
 
 export type WorkflowExecutionsGetWorkflowExecutionData = {
   executionId: string
@@ -1611,15 +1759,15 @@ export type WorkflowExecutionsGetWorkflowExecutionData = {
 }
 
 export type WorkflowExecutionsGetWorkflowExecutionResponse =
-  WorkflowExecutionResponse
+  WorkflowExecutionRead
 
-export type WorkflowExecutionsListWorkflowExecutionEventHistoryData = {
+export type WorkflowExecutionsGetWorkflowExecutionCompactData = {
   executionId: string
   workspaceId: string
 }
 
-export type WorkflowExecutionsListWorkflowExecutionEventHistoryResponse =
-  Array<EventHistoryResponse>
+export type WorkflowExecutionsGetWorkflowExecutionCompactResponse =
+  WorkflowExecutionReadCompact
 
 export type WorkflowExecutionsCancelWorkflowExecutionData = {
   executionId: string
@@ -1630,7 +1778,7 @@ export type WorkflowExecutionsCancelWorkflowExecutionResponse = void
 
 export type WorkflowExecutionsTerminateWorkflowExecutionData = {
   executionId: string
-  requestBody: TerminateWorkflowExecutionParams
+  requestBody: WorkflowExecutionTerminate
   workspaceId: string
 }
 
@@ -1882,13 +2030,6 @@ export type RegistryRepositoriesSyncRegistryRepositoryData = {
 
 export type RegistryRepositoriesSyncRegistryRepositoryResponse = void
 
-export type RegistryRepositoriesSyncExecutorFromRegistryRepositoryData = {
-  repositoryId: string
-}
-
-export type RegistryRepositoriesSyncExecutorFromRegistryRepositoryResponse =
-  void
-
 export type RegistryRepositoriesListRegistryRepositoriesResponse =
   Array<RegistryRepositoryReadMinimal>
 
@@ -2108,14 +2249,14 @@ export type PublicCheckHealthResponse = {
 }
 
 export type $OpenApiTs = {
-  "/webhooks/{path}/{secret}": {
+  "/webhooks/{workflow_id}/{secret}": {
     post: {
       req: PublicIncomingWebhookData
       res: {
         /**
          * Successful Response
          */
-        200: CreateWorkflowExecutionResponse
+        200: WorkflowExecutionCreateResponse
         /**
          * Validation Error
          */
@@ -2123,7 +2264,7 @@ export type $OpenApiTs = {
       }
     }
   }
-  "/webhooks/{path}/{secret}/wait": {
+  "/webhooks/{workflow_id}/{secret}/wait": {
     post: {
       req: PublicIncomingWebhookWaitData
       res: {
@@ -2448,7 +2589,7 @@ export type $OpenApiTs = {
         /**
          * Successful Response
          */
-        200: Array<WorkflowExecutionResponse>
+        200: Array<WorkflowExecutionReadMinimal>
         /**
          * Validation Error
          */
@@ -2461,7 +2602,7 @@ export type $OpenApiTs = {
         /**
          * Successful Response
          */
-        200: CreateWorkflowExecutionResponse
+        200: WorkflowExecutionCreateResponse
         /**
          * Validation Error
          */
@@ -2476,7 +2617,7 @@ export type $OpenApiTs = {
         /**
          * Successful Response
          */
-        200: WorkflowExecutionResponse
+        200: WorkflowExecutionRead
         /**
          * Validation Error
          */
@@ -2484,14 +2625,14 @@ export type $OpenApiTs = {
       }
     }
   }
-  "/workflow-executions/{execution_id}/history": {
+  "/workflow-executions/{execution_id}/compact": {
     get: {
-      req: WorkflowExecutionsListWorkflowExecutionEventHistoryData
+      req: WorkflowExecutionsGetWorkflowExecutionCompactData
       res: {
         /**
          * Successful Response
          */
-        200: Array<EventHistoryResponse>
+        200: WorkflowExecutionReadCompact
         /**
          * Validation Error
          */
@@ -3001,21 +3142,6 @@ export type $OpenApiTs = {
   "/registry/repos/{repository_id}/sync": {
     post: {
       req: RegistryRepositoriesSyncRegistryRepositoryData
-      res: {
-        /**
-         * Successful Response
-         */
-        204: void
-        /**
-         * Validation Error
-         */
-        422: HTTPValidationError
-      }
-    }
-  }
-  "/registry/repos/{repository_id}/sync-executor": {
-    post: {
-      req: RegistryRepositoriesSyncExecutorFromRegistryRepositoryData
       res: {
         /**
          * Successful Response

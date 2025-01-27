@@ -42,15 +42,15 @@ from tracecat.dsl.models import (
 from tracecat.dsl.worker import get_activities, new_sandbox_runner
 from tracecat.dsl.workflow import DSLWorkflow, retry_policies
 from tracecat.expressions.common import ExprContext
-from tracecat.identifiers.workflow import WorkflowExecutionID, WorkflowID
+from tracecat.identifiers.workflow import WorkflowExecutionID, WorkflowID, WorkflowUUID
 from tracecat.logger import logger
 from tracecat.secrets.models import SecretCreate, SecretKeyValue
 from tracecat.secrets.service import SecretsService
 from tracecat.types.auth import Role
+from tracecat.workflow.executions.enums import WorkflowEventType
 from tracecat.workflow.executions.models import (
     EventGroup,
-    EventHistoryResponse,
-    EventHistoryType,
+    WorkflowExecutionEvent,
 )
 from tracecat.workflow.executions.service import WorkflowExecutionsService
 from tracecat.workflow.management.definitions import WorkflowDefinitionsService
@@ -568,14 +568,15 @@ async def _create_and_commit_workflow(
         workflow = res.workflow
         if not workflow:
             return pytest.fail("Workflow wasn't created")
+        workflow_id = WorkflowUUID.new(workflow.id)
         if alias:
-            await mgmt_service.update_workflow(workflow.id, WorkflowUpdate(alias=alias))
+            await mgmt_service.update_workflow(workflow_id, WorkflowUpdate(alias=alias))
         constructed_dsl = await mgmt_service.build_dsl_from_workflow(workflow)
 
         # Commit the child workflow
         defn_service = WorkflowDefinitionsService(session, role=role)
         await defn_service.create_workflow_definition(
-            workflow_id=workflow.id, dsl=constructed_dsl
+            workflow_id=workflow_id, dsl=constructed_dsl
         )
         return workflow
 
@@ -715,7 +716,7 @@ async def test_child_workflow_context_passing(test_role, temporal_client):
     child_workflow = await _create_and_commit_workflow(child_dsl, test_role)
 
     # Parent
-    parent_workflow_id = "wf-00000000000000000000000000000002"
+    parent_workflow_id = WorkflowUUID.new("wf-00000000000000000000000000000002")
     parent_dsl = DSLInput(
         **{
             "title": "Parent",
@@ -881,7 +882,7 @@ async def test_child_workflow_loop(
     run_args = DSLRunArgs(
         dsl=parent_dsl,
         role=test_role,
-        wf_id="wf-00000000000000000000000000000002",
+        wf_id=WorkflowUUID.new("wf-00000000000000000000000000000002"),
         trigger_inputs={
             "data": "__EXPECTED_DATA__",
         },
@@ -964,7 +965,7 @@ async def test_single_child_workflow_alias(
     run_args = DSLRunArgs(
         dsl=parent_dsl,
         role=test_role,
-        wf_id="wf-00000000000000000000000000000002",
+        wf_id=WorkflowUUID.new("wf-00000000000000000000000000000002"),
     )
     result = await _run_workflow(temporal_client, wf_exec_id, run_args)
     # Parent expected
@@ -1042,7 +1043,7 @@ async def test_child_workflow_alias_with_loop(
     run_args = DSLRunArgs(
         dsl=parent_dsl,
         role=test_role,
-        wf_id="wf-00000000000000000000000000000002",
+        wf_id=WorkflowUUID.new("wf-00000000000000000000000000000002"),
         trigger_inputs="__EXPECTED_DATA__",
     )
     result = await _run_workflow(temporal_client, wf_exec_id, run_args)
@@ -1546,16 +1547,17 @@ async def test_pull_based_workflow_fetches_latest_version(temporal_client, test_
         if not workflow:
             return pytest.fail("Workflow wasn't created")
         constructed_dsl = await mgmt_service.build_dsl_from_workflow(workflow)
+        workflow_id = WorkflowUUID.new(workflow.id)
 
         # 2) Create first workflow definition
         defn_service = WorkflowDefinitionsService(session, role=test_role)
         await defn_service.create_workflow_definition(
-            workflow_id=workflow.id, dsl=constructed_dsl
+            workflow_id=workflow_id, dsl=constructed_dsl
         )
 
     run_args = DSLRunArgs(
         role=test_role,
-        wf_id=workflow.id,
+        wf_id=workflow_id,
         # NOTE: Not setting dsl here to make it pull based
         # Not setting schedule_id here to make it use the passed in trigger inputs
     )
@@ -1589,7 +1591,7 @@ async def test_pull_based_workflow_fetches_latest_version(temporal_client, test_
         # 4) Create second workflow definition
         defn_service = WorkflowDefinitionsService(session, role=test_role)
         await defn_service.create_workflow_definition(
-            workflow_id=workflow.id, dsl=second_dsl
+            workflow_id=workflow_id, dsl=second_dsl
         )
 
     result = await _run_workflow(temporal_client, f"{wf_exec_id}:second", run_args)
@@ -2396,19 +2398,20 @@ async def error_handler_wf_and_dsl(
         workflow = res.workflow
         if not workflow:
             raise ValueError("Workflow wasn't created")
+        workflow_id = WorkflowUUID.new(workflow.id)
         if alias:
-            await mgmt_service.update_workflow(workflow.id, WorkflowUpdate(alias=alias))
+            await mgmt_service.update_workflow(workflow_id, WorkflowUpdate(alias=alias))
         constructed_dsl = await mgmt_service.build_dsl_from_workflow(workflow)
 
         # Commit the child workflow
         defn_service = WorkflowDefinitionsService(session, role=test_role)
         await defn_service.create_workflow_definition(
-            workflow_id=workflow.id, dsl=constructed_dsl
+            workflow_id=workflow_id, dsl=constructed_dsl
         )
         try:
             yield ErrorHandlerWfAndDslT(dsl, workflow)
         finally:
-            await mgmt_service.delete_workflow(workflow.id)
+            await mgmt_service.delete_workflow(workflow_id)
 
 
 @pytest.fixture
@@ -2430,8 +2433,8 @@ def failing_dsl():
 
 
 def assert_erroneous_task_failed_correctly(
-    events: list[EventHistoryResponse],
-) -> EventHistoryResponse[RunActionInput]:
+    events: list[WorkflowExecutionEvent],
+) -> WorkflowExecutionEvent[RunActionInput]:
     # 4.1 Match the failing task:
     #  - event_type == "ACTIVITY_TASK_FAILED"
     # - Matching action ref
@@ -2440,7 +2443,7 @@ def assert_erroneous_task_failed_correctly(
         event
         for event in events
         if (
-            event.event_type == EventHistoryType.ACTIVITY_TASK_FAILED
+            event.event_type == WorkflowEventType.ACTIVITY_TASK_FAILED
             and event.event_group
             and event.event_group.action_ref == "failing_action"
         )
@@ -2477,13 +2480,13 @@ def assert_erroneous_task_failed_correctly(
 
 
 def assert_error_handler_initiated_correctly(
-    events: list[EventHistoryResponse],
+    events: list[WorkflowExecutionEvent],
     *,
     handler_dsl: DSLInput,
     handler_wf: Workflow,
     failing_wf_id: WorkflowID,
     failing_wf_exec_id: WorkflowExecutionID,
-) -> EventHistoryResponse[RunActionInput]:
+) -> WorkflowExecutionEvent[RunActionInput]:
     # # 5.1 Find the event where the error handler was called
     evt = next(
         (
@@ -2491,7 +2494,7 @@ def assert_error_handler_initiated_correctly(
             for event in events
             if (
                 event.event_type
-                == EventHistoryType.START_CHILD_WORKFLOW_EXECUTION_INITIATED
+                == WorkflowEventType.START_CHILD_WORKFLOW_EXECUTION_INITIATED
                 and event.event_group
                 and event.event_group.action_ref is None
                 and event.event_group.action_title == "Testing Error Handler"
@@ -2528,23 +2531,23 @@ def assert_error_handler_initiated_correctly(
                 "type": "ExecutorClientError",
             }
         },
-        "handler_wf_id": handler_wf.id,
+        "handler_wf_id": str(WorkflowUUID.new(handler_wf.id)),
         "message": "Workflow failed with 1 task exception(s)\n\n==================== (1/1) ACTIONS.failing_action ====================\n\nExecutorClientError: [ACTIONS.failing_action -> run_action] (Attempt 1)\n\nThere was an error in the executor when calling action 'core.transform.reshape' (500).\n\nTracecatExpressionError: Error evaluating expression `1/0`\n\n[evaluator] Evaluation failed at node:\n```\nbinary_op\n  literal\t1\n  /\n  literal\t0\n\n```\nReason: Error trying to process rule \"binary_op\":\n\nCannot divide by zero\n\n------------------------------\nFile: /app/tracecat/expressions/core.py\nFunction: result\nLine: 74",
         "orig_wf_exec_id": failing_wf_exec_id,
-        "orig_wf_id": failing_wf_id,
+        "orig_wf_id": str(failing_wf_id),
     }
     return evt
 
 
 def assert_error_handler_started(
-    events: list[EventHistoryResponse],
-) -> EventHistoryResponse:
+    events: list[WorkflowExecutionEvent],
+) -> WorkflowExecutionEvent:
     evt = next(
         (
             event
             for event in events
             if (
-                event.event_type == EventHistoryType.CHILD_WORKFLOW_EXECUTION_STARTED
+                event.event_type == WorkflowEventType.CHILD_WORKFLOW_EXECUTION_STARTED
                 and event.event_group
                 and event.event_group.action_ref is None
                 and event.event_group.action_title == "Testing Error Handler"
@@ -2557,14 +2560,14 @@ def assert_error_handler_started(
 
 
 def assert_error_handler_completed(
-    events: list[EventHistoryResponse],
-) -> EventHistoryResponse:
+    events: list[WorkflowExecutionEvent],
+) -> WorkflowExecutionEvent:
     evt = next(
         (
             event
             for event in events
             if (
-                event.event_type == EventHistoryType.CHILD_WORKFLOW_EXECUTION_COMPLETED
+                event.event_type == WorkflowEventType.CHILD_WORKFLOW_EXECUTION_COMPLETED
                 and event.event_group
                 and event.event_group.action_ref is None
                 and event.event_group.action_title == "Testing Error Handler"
@@ -2607,7 +2610,7 @@ async def test_workflow_error_handler_success(
 
     match mode:
         case "id":
-            error_handler = handler_wf.id
+            error_handler = WorkflowUUID.new(handler_wf.id).short()
         case "alias":
             error_handler = handler_wf.alias
         case _:
@@ -2626,7 +2629,7 @@ async def test_workflow_error_handler_success(
 
     # Check temporal event history
     exec_svc = await WorkflowExecutionsService.connect(role=test_role)
-    events = await exec_svc.list_workflow_execution_event_history(wf_exec_id)
+    events = await exec_svc.list_workflow_execution_events(wf_exec_id)
     assert len(events) > 0
 
     # 4. Verify the failing task is in the event history
@@ -2665,7 +2668,7 @@ async def test_workflow_error_handler_success(
     [
         pytest.param(
             "wf-00000000000000000000000000000000",
-            "TracecatException: Workflow definition not found for 'wf-00000000000000000000000000000000', version=None",
+            "TracecatException: Workflow definition not found for WorkflowUUID('00000000-0000-0000-0000-000000000000'), version=None",
             id="id-no-match",
         ),
         pytest.param(

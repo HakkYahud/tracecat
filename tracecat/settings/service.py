@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import orjson
+from async_lru import alru_cache
 from pydantic import BaseModel, SecretStr
 from pydantic_core import to_jsonable_python
 from sqlmodel import col, select
@@ -10,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from tracecat import config
 from tracecat.authz.controls import require_access_level
+from tracecat.contexts import ctx_role
 from tracecat.db.schemas import OrganizationSetting
 from tracecat.logger import logger
 from tracecat.secrets.encryption import decrypt_value, encrypt_value
@@ -264,6 +266,7 @@ async def get_setting(
     default: Any | None = None,
 ) -> Any | None:
     """Shorthand to get a setting value from the database."""
+    role = role or ctx_role.get()
 
     # If we have an environment override, use it
     if override_val := get_setting_override(key):
@@ -297,6 +300,29 @@ async def get_setting(
     return no_default_val
 
 
+@alru_cache(ttl=30)
+async def get_setting_cached(
+    key: str,
+    *,
+    role: Role | None = None,
+    session: AsyncSession | None = None,
+    default: Any | None = None,
+) -> Any | None:
+    """Cached version of get_setting function.
+
+    Args:
+        key: The setting key to retrieve
+        role: Optional role to use for permissions check
+        session: Optional database session to use
+        default: Optional default value if setting not found. Must be hashable.
+
+    Returns:
+        The setting value or None if not found
+    """
+    logger.debug("Cache miss", key=key)
+    return await get_setting(key, role=role, session=session, default=default)
+
+
 def get_setting_override(key: str) -> Any | None:
     """Get an environment override for a setting."""
     # Only allow overrides for specific settings
@@ -307,7 +333,7 @@ def get_setting_override(key: str) -> Any | None:
     }
 
     if key not in allowed_override_keys:
-        logger.warning(f"Attempted override of unauthorized setting: {key}")
+        logger.debug(f"Setting override not supported: {key}")
         return None
 
     return os.environ.get(f"TRACECAT__SETTING_OVERRIDE_{key.upper()}")

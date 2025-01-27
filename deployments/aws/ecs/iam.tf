@@ -59,7 +59,27 @@ resource "aws_iam_policy" "secrets_access" {
   depends_on = [aws_db_instance.core_database]
 }
 
+resource "aws_iam_policy" "task_secrets_access" {
+  count       = var.disable_temporal_autosetup ? 0 : 1
+  name        = "TracecatTaskSecretsAccessPolicy"
+  description = "Policy for accessing Tracecat secrets at runtime"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = compact([
+          var.temporal_api_key_arn,
+          var.temporal_mtls_cert_arn,
+        ])
+      }
+    ]
+  })
+}
+
 resource "aws_iam_policy" "temporal_secrets_access" {
+  count       = var.disable_temporal_autosetup ? 0 : 1
   name        = "TracecatTemporalSecretsAccessPolicy"
   description = "Policy for accessing Temporal secrets"
 
@@ -70,7 +90,7 @@ resource "aws_iam_policy" "temporal_secrets_access" {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
         Resource = [
-          aws_db_instance.temporal_database.master_user_secret[0].secret_arn
+          aws_db_instance.temporal_database[0].master_user_secret[0].secret_arn
         ]
       }
     ]
@@ -111,44 +131,12 @@ resource "aws_iam_role_policy_attachment" "worker_execution_secrets" {
   role       = aws_iam_role.worker_execution.name
 }
 
-# Executor execution role
-resource "aws_iam_role" "executor_execution" {
-  name               = "TracecatExecutorExecutionRole"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
-# UI execution role
-resource "aws_iam_role" "ui_execution" {
-  name               = "TracecatUIExecutionRole"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "ui_execution_ecs_poll" {
-  policy_arn = aws_iam_policy.ecs_poll.arn
-  role       = aws_iam_role.ui_execution.name
-}
-
-# Temporal execution role
-resource "aws_iam_role" "temporal_execution" {
-  name               = "TracecatTemporalExecutionRole"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "temporal_execution_ecs_poll" {
-  policy_arn = aws_iam_policy.ecs_poll.arn
-  role       = aws_iam_role.temporal_execution.name
-}
-
-resource "aws_iam_role_policy_attachment" "temporal_execution_secrets" {
-  policy_arn = aws_iam_policy.temporal_secrets_access.arn
-  role       = aws_iam_role.temporal_execution.name
-}
-
 # API and Worker task role
 resource "aws_iam_role" "api_worker_task" {
   name               = "TracecatAPIWorkerTaskRole"
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
+
 resource "aws_iam_role_policy" "api_worker_task_db_access" {
   name = "TracecatAPIWorkerDBAccessPolicy"
   role = aws_iam_role.api_worker_task.id
@@ -170,16 +158,53 @@ resource "aws_iam_role_policy" "api_worker_task_db_access" {
     ]
   })
 }
+resource "aws_iam_role_policy_attachment" "api_worker_task_secrets" {
+  count      = var.disable_temporal_autosetup ? 0 : 1
+  policy_arn = aws_iam_policy.task_secrets_access[0].arn
+  role       = aws_iam_role.api_worker_task.name
+}
+
+# UI execution role
+resource "aws_iam_role" "ui_execution" {
+  name               = "TracecatUIExecutionRole"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "ui_execution_ecs_poll" {
+  policy_arn = aws_iam_policy.ecs_poll.arn
+  role       = aws_iam_role.ui_execution.name
+}
+
+# Temporal execution role
+resource "aws_iam_role" "temporal_execution" {
+  count              = var.disable_temporal_autosetup ? 0 : 1
+  name               = "TracecatTemporalExecutionRole"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "temporal_execution_ecs_poll" {
+  count      = var.disable_temporal_autosetup ? 0 : 1
+  policy_arn = aws_iam_policy.ecs_poll.arn
+  role       = aws_iam_role.temporal_execution[0].name
+}
+
+resource "aws_iam_role_policy_attachment" "temporal_execution_secrets" {
+  count      = var.disable_temporal_autosetup ? 0 : 1
+  policy_arn = aws_iam_policy.temporal_secrets_access[0].arn
+  role       = aws_iam_role.temporal_execution[0].name
+}
 
 # Temporal task role
 resource "aws_iam_role" "temporal_task" {
+  count              = var.disable_temporal_autosetup ? 0 : 1
   name               = "TracecatTemporalTaskRole"
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
 
 resource "aws_iam_role_policy" "temporal_task_db_access" {
-  name = "TracecatTemporalDBAccessPolicy"
-  role = aws_iam_role.temporal_task.id
+  count = var.disable_temporal_autosetup ? 0 : 1
+  name  = "TracecatTemporalDBAccessPolicy"
+  role  = aws_iam_role.temporal_task[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -190,13 +215,12 @@ resource "aws_iam_role_policy" "temporal_task_db_access" {
           "rds-db:connect"
         ]
         Resource = [
-          "${aws_db_instance.temporal_database.arn}/postgres"
+          "${aws_db_instance.temporal_database[0].arn}/postgres"
         ]
       }
     ]
   })
 }
-
 
 # Caddy execution role
 resource "aws_iam_role" "caddy_execution" {
@@ -207,12 +231,6 @@ resource "aws_iam_role" "caddy_execution" {
 resource "aws_iam_role_policy_attachment" "caddy_execution_ecs_poll" {
   policy_arn = aws_iam_policy.ecs_poll.arn
   role       = aws_iam_role.caddy_execution.name
-}
-
-# Caddy task role (minimal permissions)
-resource "aws_iam_role" "caddy_task" {
-  name               = "TracecatCaddyTaskRole"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
 
 # Add CloudWatch Logs policy
@@ -253,8 +271,9 @@ resource "aws_iam_role_policy_attachment" "ui_execution_cloudwatch_logs" {
 }
 
 resource "aws_iam_role_policy_attachment" "temporal_execution_cloudwatch_logs" {
+  count      = var.disable_temporal_autosetup ? 0 : 1
   policy_arn = aws_iam_policy.cloudwatch_logs.arn
-  role       = aws_iam_role.temporal_execution.name
+  role       = aws_iam_role.temporal_execution[0].name
 }
 
 resource "aws_iam_role_policy_attachment" "caddy_execution_cloudwatch_logs" {
@@ -274,10 +293,10 @@ resource "aws_iam_policy" "temporal_ui_secrets_access" {
       {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
-        Resource = [
+        Resource = compact([
           var.temporal_auth_client_id_arn,
           var.temporal_auth_client_secret_arn
-        ]
+        ])
       }
     ]
   })

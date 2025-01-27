@@ -68,8 +68,16 @@ export const $ActionControlFlow = {
 export const $ActionCreate = {
   properties: {
     workflow_id: {
-      type: "string",
-      pattern: "wf-[0-9a-f]{32}",
+      anyOf: [
+        {
+          type: "string",
+          pattern: "wf_[0-9a-zA-Z]+",
+        },
+        {
+          type: "string",
+          pattern: "wf-[0-9a-f]{32}",
+        },
+      ],
       title: "Workflow Id",
     },
     type: {
@@ -133,7 +141,7 @@ export const $ActionReadMinimal = {
     },
     workflow_id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
+      pattern: "wf_[0-9a-zA-Z]+",
       title: "Workflow Id",
     },
     type: {
@@ -543,50 +551,6 @@ export const $Body_workflows_create_workflow = {
   title: "Body_workflows-create_workflow",
 } as const
 
-export const $CreateWorkflowExecutionParams = {
-  properties: {
-    workflow_id: {
-      type: "string",
-      pattern: "wf-[0-9a-f]{32}",
-      title: "Workflow Id",
-    },
-    inputs: {
-      anyOf: [
-        {},
-        {
-          type: "null",
-        },
-      ],
-      title: "Inputs",
-    },
-  },
-  type: "object",
-  required: ["workflow_id"],
-  title: "CreateWorkflowExecutionParams",
-} as const
-
-export const $CreateWorkflowExecutionResponse = {
-  properties: {
-    message: {
-      type: "string",
-      title: "Message",
-    },
-    wf_id: {
-      type: "string",
-      pattern: "wf-[0-9a-f]{32}",
-      title: "Wf Id",
-    },
-    wf_exec_id: {
-      type: "string",
-      pattern: "wf-[0-9a-f]{32}:(exec-[\\w-]+|sch-[0-9a-f]{32}-.*)",
-      title: "Wf Exec Id",
-    },
-  },
-  type: "object",
-  required: ["message", "wf_id", "wf_exec_id"],
-  title: "CreateWorkflowExecutionResponse",
-} as const
-
 export const $CreateWorkspaceMembershipParams = {
   properties: {
     user_id: {
@@ -812,7 +776,6 @@ export const $DSLRunArgs = {
     },
     wf_id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
       title: "Wf Id",
     },
     trigger_inputs: {
@@ -1096,7 +1059,8 @@ export const $EventGroup = {
       anyOf: [
         {
           type: "string",
-          pattern: "wf-[0-9a-f]{32}:(exec-[\\w-]+|sch-[0-9a-f]{32}-.*)",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
         },
         {
           type: "null",
@@ -1114,118 +1078,6 @@ export const $EventGroup = {
     "action_input",
   ],
   title: "EventGroup",
-} as const
-
-export const $EventHistoryResponse = {
-  properties: {
-    event_id: {
-      type: "integer",
-      title: "Event Id",
-    },
-    event_time: {
-      type: "string",
-      format: "date-time",
-      title: "Event Time",
-    },
-    event_type: {
-      $ref: "#/components/schemas/EventHistoryType",
-    },
-    task_id: {
-      type: "integer",
-      title: "Task Id",
-    },
-    event_group: {
-      anyOf: [
-        {
-          $ref: "#/components/schemas/EventGroup",
-        },
-        {
-          type: "null",
-        },
-      ],
-      description:
-        "The action group of the event. We use this to keep track of what events are related to each other.",
-    },
-    failure: {
-      anyOf: [
-        {
-          $ref: "#/components/schemas/EventFailure",
-        },
-        {
-          type: "null",
-        },
-      ],
-    },
-    result: {
-      anyOf: [
-        {},
-        {
-          type: "null",
-        },
-      ],
-      title: "Result",
-    },
-    role: {
-      anyOf: [
-        {
-          $ref: "#/components/schemas/Role",
-        },
-        {
-          type: "null",
-        },
-      ],
-    },
-    parent_wf_exec_id: {
-      anyOf: [
-        {
-          type: "string",
-          pattern: "wf-[0-9a-f]{32}:(exec-[\\w-]+|sch-[0-9a-f]{32}-.*)",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Parent Wf Exec Id",
-    },
-    workflow_timeout: {
-      anyOf: [
-        {
-          type: "number",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Workflow Timeout",
-    },
-  },
-  type: "object",
-  required: ["event_id", "event_time", "event_type", "task_id"],
-  title: "EventHistoryResponse",
-} as const
-
-export const $EventHistoryType = {
-  type: "string",
-  enum: [
-    "WORKFLOW_EXECUTION_STARTED",
-    "WORKFLOW_EXECUTION_COMPLETED",
-    "WORKFLOW_EXECUTION_FAILED",
-    "WORKFLOW_EXECUTION_TERMINATED",
-    "WORKFLOW_EXECUTION_CANCELED",
-    "WORKFLOW_EXECUTION_CONTINUED_AS_NEW",
-    "WORKFLOW_EXECUTION_TIMED_OUT",
-    "ACTIVITY_TASK_SCHEDULED",
-    "ACTIVITY_TASK_STARTED",
-    "ACTIVITY_TASK_COMPLETED",
-    "ACTIVITY_TASK_FAILED",
-    "ACTIVITY_TASK_TIMED_OUT",
-    "CHILD_WORKFLOW_EXECUTION_STARTED",
-    "CHILD_WORKFLOW_EXECUTION_COMPLETED",
-    "CHILD_WORKFLOW_EXECUTION_FAILED",
-    "START_CHILD_WORKFLOW_EXECUTION_INITIATED",
-  ],
-  title: "EventHistoryType",
-  description: "The event types we care about.",
 } as const
 
 export const $ExpectedField = {
@@ -1284,7 +1136,6 @@ export const $GetWorkflowDefinitionActivityInputs = {
     },
     workflow_id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
       title: "Workflow Id",
     },
     version: {
@@ -1642,6 +1493,20 @@ export const $RegistryActionCreate = {
       title: "Author",
       description: "Author of the action",
     },
+    deprecated: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 1000,
+          minLength: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Deprecated",
+      description: "Marks action as deprecated along with message",
+    },
     options: {
       allOf: [
         {
@@ -1815,6 +1680,20 @@ export const $RegistryActionRead = {
       ],
       title: "Author",
       description: "Author of the action",
+    },
+    deprecated: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 1000,
+          minLength: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Deprecated",
+      description: "Marks action as deprecated along with message",
     },
     options: {
       allOf: [
@@ -2054,6 +1933,20 @@ export const $RegistryActionUpdate = {
       ],
       title: "Author",
       description: "Update the author of the action",
+    },
+    deprecated: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 1000,
+          minLength: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Deprecated",
+      description: "Update the deprecation message of the action",
     },
     options: {
       anyOf: [
@@ -2353,6 +2246,7 @@ export const $Role = {
         "tracecat-schedule-runner",
         "tracecat-service",
         "tracecat-executor",
+        "tracecat-bootstrap",
       ],
       title: "Service Id",
     },
@@ -2410,12 +2304,12 @@ export const $RunContext = {
   properties: {
     wf_id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
       title: "Wf Id",
     },
     wf_exec_id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}:(exec-[\\w-]+|sch-[0-9a-f]{32}-.*)",
+      pattern:
+        "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
       title: "Wf Exec Id",
     },
     wf_run_id: {
@@ -2484,7 +2378,7 @@ export const $SAMLSettingsUpdate = {
       type: "boolean",
       title: "Saml Enabled",
       description: "Whether SAML is enabled.",
-      default: false,
+      default: true,
     },
     saml_enforced: {
       type: "boolean",
@@ -2609,14 +2503,8 @@ export const $Schedule = {
         "The maximum number of seconds to wait for the workflow to complete",
     },
     workflow_id: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
+      type: "string",
+      format: "uuid",
       title: "Workflow Id",
     },
   },
@@ -2628,8 +2516,16 @@ export const $Schedule = {
 export const $ScheduleCreate = {
   properties: {
     workflow_id: {
-      type: "string",
-      pattern: "wf-[0-9a-f]{32}",
+      anyOf: [
+        {
+          type: "string",
+          pattern: "wf_[0-9a-zA-Z]+",
+        },
+        {
+          type: "string",
+          pattern: "wf-[0-9a-f]{32}",
+        },
+      ],
       title: "Workflow Id",
     },
     inputs: {
@@ -3211,6 +3107,13 @@ export const $SessionRead = {
   title: "SessionRead",
 } as const
 
+export const $SpecialUserID = {
+  type: "string",
+  const: "current",
+  title: "SpecialUserID",
+  description: "A sentinel user ID that represents the current user.",
+} as const
+
 export const $TagCreate = {
   properties: {
     name: {
@@ -3387,6 +3290,18 @@ export const $TemplateActionDefinition = {
       title: "Author",
       description: "Author of the action",
     },
+    deprecated: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Deprecated",
+      description: "Marks action as deprecated along with message",
+    },
     secrets: {
       anyOf: [
         {
@@ -3450,24 +3365,6 @@ export const $TemplateActionDefinition = {
   title: "TemplateActionDefinition",
 } as const
 
-export const $TerminateWorkflowExecutionParams = {
-  properties: {
-    reason: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Reason",
-    },
-  },
-  type: "object",
-  title: "TerminateWorkflowExecutionParams",
-} as const
-
 export const $Trigger = {
   properties: {
     type: {
@@ -3488,6 +3385,13 @@ export const $Trigger = {
   type: "object",
   required: ["type", "ref"],
   title: "Trigger",
+} as const
+
+export const $TriggerType = {
+  type: "string",
+  enum: ["manual", "scheduled", "webhook"],
+  title: "TriggerType",
+  description: "Trigger type for a workflow execution.",
 } as const
 
 export const $UpdateWorkspaceParams = {
@@ -3930,6 +3834,7 @@ export const $WorkflowCommitResponse = {
   properties: {
     workflow_id: {
       type: "string",
+      pattern: "wf_[0-9a-zA-Z]+",
       title: "Workflow Id",
     },
     status: {
@@ -4000,6 +3905,7 @@ export const $WorkflowDefinition = {
     },
     workflow_id: {
       type: "string",
+      format: "uuid",
       title: "Workflow Id",
     },
     content: {
@@ -4030,7 +3936,295 @@ Relationships
 - 1 Workflow to many WorkflowDefinitions`,
 } as const
 
-export const $WorkflowExecutionResponse = {
+export const $WorkflowEventType = {
+  type: "string",
+  enum: [
+    "WORKFLOW_EXECUTION_STARTED",
+    "WORKFLOW_EXECUTION_COMPLETED",
+    "WORKFLOW_EXECUTION_FAILED",
+    "WORKFLOW_EXECUTION_TERMINATED",
+    "WORKFLOW_EXECUTION_CANCELED",
+    "WORKFLOW_EXECUTION_CONTINUED_AS_NEW",
+    "WORKFLOW_EXECUTION_TIMED_OUT",
+    "ACTIVITY_TASK_SCHEDULED",
+    "ACTIVITY_TASK_STARTED",
+    "ACTIVITY_TASK_COMPLETED",
+    "ACTIVITY_TASK_FAILED",
+    "ACTIVITY_TASK_TIMED_OUT",
+    "ACTIVITY_TASK_CANCELED",
+    "CHILD_WORKFLOW_EXECUTION_STARTED",
+    "CHILD_WORKFLOW_EXECUTION_COMPLETED",
+    "CHILD_WORKFLOW_EXECUTION_FAILED",
+    "CHILD_WORKFLOW_EXECUTION_CANCELED",
+    "CHILD_WORKFLOW_EXECUTION_TERMINATED",
+    "START_CHILD_WORKFLOW_EXECUTION_INITIATED",
+    "CHILD_WORKFLOW_EXECUTION_TIMED_OUT",
+  ],
+  title: "WorkflowEventType",
+  description: "The event types we care about.",
+} as const
+
+export const $WorkflowExecutionCreate = {
+  properties: {
+    workflow_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern: "wf_[0-9a-zA-Z]+",
+        },
+        {
+          type: "string",
+          pattern: "wf-[0-9a-f]{32}",
+        },
+      ],
+      title: "Workflow Id",
+    },
+    inputs: {
+      anyOf: [
+        {},
+        {
+          type: "null",
+        },
+      ],
+      title: "Inputs",
+    },
+  },
+  type: "object",
+  required: ["workflow_id"],
+  title: "WorkflowExecutionCreate",
+} as const
+
+export const $WorkflowExecutionCreateResponse = {
+  properties: {
+    message: {
+      type: "string",
+      title: "Message",
+    },
+    wf_id: {
+      type: "string",
+      title: "Wf Id",
+    },
+    wf_exec_id: {
+      type: "string",
+      pattern:
+        "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+      title: "Wf Exec Id",
+    },
+  },
+  type: "object",
+  required: ["message", "wf_id", "wf_exec_id"],
+  title: "WorkflowExecutionCreateResponse",
+} as const
+
+export const $WorkflowExecutionEvent = {
+  properties: {
+    event_id: {
+      type: "integer",
+      title: "Event Id",
+    },
+    event_time: {
+      type: "string",
+      format: "date-time",
+      title: "Event Time",
+    },
+    event_type: {
+      $ref: "#/components/schemas/WorkflowEventType",
+    },
+    task_id: {
+      type: "integer",
+      title: "Task Id",
+    },
+    event_group: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/EventGroup",
+        },
+        {
+          type: "null",
+        },
+      ],
+      description:
+        "The action group of the event. We use this to keep track of what events are related to each other.",
+    },
+    failure: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/EventFailure",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    result: {
+      anyOf: [
+        {},
+        {
+          type: "null",
+        },
+      ],
+      title: "Result",
+    },
+    role: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/Role",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    parent_wf_exec_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Parent Wf Exec Id",
+    },
+    workflow_timeout: {
+      anyOf: [
+        {
+          type: "number",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow Timeout",
+    },
+  },
+  type: "object",
+  required: ["event_id", "event_time", "event_type", "task_id"],
+  title: "WorkflowExecutionEvent",
+} as const
+
+export const $WorkflowExecutionEventCompact = {
+  properties: {
+    source_event_id: {
+      type: "integer",
+      title: "Source Event Id",
+    },
+    schedule_time: {
+      type: "string",
+      format: "date-time",
+      title: "Schedule Time",
+    },
+    start_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Start Time",
+    },
+    close_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Close Time",
+    },
+    curr_event_type: {
+      $ref: "#/components/schemas/WorkflowEventType",
+    },
+    status: {
+      $ref: "#/components/schemas/WorkflowExecutionEventStatus",
+    },
+    action_name: {
+      type: "string",
+      title: "Action Name",
+    },
+    action_ref: {
+      type: "string",
+      title: "Action Ref",
+    },
+    action_input: {
+      anyOf: [
+        {},
+        {
+          type: "null",
+        },
+      ],
+      title: "Action Input",
+    },
+    action_result: {
+      anyOf: [
+        {},
+        {
+          type: "null",
+        },
+      ],
+      title: "Action Result",
+    },
+    action_error: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/EventFailure",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    child_wf_exec_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Child Wf Exec Id",
+    },
+  },
+  type: "object",
+  required: [
+    "source_event_id",
+    "schedule_time",
+    "curr_event_type",
+    "status",
+    "action_name",
+    "action_ref",
+  ],
+  title: "WorkflowExecutionEventCompact",
+  description: "A compact representation of a workflow execution event.",
+} as const
+
+export const $WorkflowExecutionEventStatus = {
+  type: "string",
+  enum: [
+    "SCHEDULED",
+    "STARTED",
+    "COMPLETED",
+    "FAILED",
+    "CANCELED",
+    "TERMINATED",
+    "TIMED_OUT",
+    "UNKNOWN",
+  ],
+  title: "WorkflowExecutionEventStatus",
+} as const
+
+export const $WorkflowExecutionRead = {
   properties: {
     id: {
       type: "string",
@@ -4099,6 +4293,229 @@ export const $WorkflowExecutionResponse = {
       title: "History Length",
       description: "Number of events in the history",
     },
+    parent_wf_exec_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Parent Wf Exec Id",
+    },
+    events: {
+      items: {
+        $ref: "#/components/schemas/WorkflowExecutionEvent",
+      },
+      type: "array",
+      title: "Events",
+      description: "The events in the workflow execution",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "run_id",
+    "start_time",
+    "status",
+    "workflow_type",
+    "task_queue",
+    "history_length",
+    "events",
+  ],
+  title: "WorkflowExecutionRead",
+} as const
+
+export const $WorkflowExecutionReadCompact = {
+  properties: {
+    id: {
+      type: "string",
+      title: "Id",
+      description: "The ID of the workflow execution",
+    },
+    run_id: {
+      type: "string",
+      title: "Run Id",
+      description: "The run ID of the workflow execution",
+    },
+    start_time: {
+      type: "string",
+      format: "date-time",
+      title: "Start Time",
+      description: "The start time of the workflow execution",
+    },
+    execution_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Execution Time",
+      description: "When this workflow run started or should start.",
+    },
+    close_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Close Time",
+      description: "When the workflow was closed if closed.",
+    },
+    status: {
+      type: "string",
+      enum: [
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "CANCELED",
+        "TERMINATED",
+        "CONTINUED_AS_NEW",
+        "TIMED_OUT",
+      ],
+    },
+    workflow_type: {
+      type: "string",
+      title: "Workflow Type",
+    },
+    task_queue: {
+      type: "string",
+      title: "Task Queue",
+    },
+    history_length: {
+      type: "integer",
+      title: "History Length",
+      description: "Number of events in the history",
+    },
+    parent_wf_exec_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Parent Wf Exec Id",
+    },
+    events: {
+      items: {
+        $ref: "#/components/schemas/WorkflowExecutionEventCompact",
+      },
+      type: "array",
+      title: "Events",
+      description: "Compact events in the workflow execution",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "run_id",
+    "start_time",
+    "status",
+    "workflow_type",
+    "task_queue",
+    "history_length",
+    "events",
+  ],
+  title: "WorkflowExecutionReadCompact",
+} as const
+
+export const $WorkflowExecutionReadMinimal = {
+  properties: {
+    id: {
+      type: "string",
+      title: "Id",
+      description: "The ID of the workflow execution",
+    },
+    run_id: {
+      type: "string",
+      title: "Run Id",
+      description: "The run ID of the workflow execution",
+    },
+    start_time: {
+      type: "string",
+      format: "date-time",
+      title: "Start Time",
+      description: "The start time of the workflow execution",
+    },
+    execution_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Execution Time",
+      description: "When this workflow run started or should start.",
+    },
+    close_time: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Close Time",
+      description: "When the workflow was closed if closed.",
+    },
+    status: {
+      type: "string",
+      enum: [
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "CANCELED",
+        "TERMINATED",
+        "CONTINUED_AS_NEW",
+        "TIMED_OUT",
+      ],
+    },
+    workflow_type: {
+      type: "string",
+      title: "Workflow Type",
+    },
+    task_queue: {
+      type: "string",
+      title: "Task Queue",
+    },
+    history_length: {
+      type: "integer",
+      title: "History Length",
+      description: "Number of events in the history",
+    },
+    parent_wf_exec_id: {
+      anyOf: [
+        {
+          type: "string",
+          pattern:
+            "(?P<workflow_id>wf-[0-9a-f]{32}|wf_[0-9a-zA-Z]+)[:/](?P<execution_id>(exec_[0-9a-zA-Z]+|exec-[\\w-]+|sch-[0-9a-f]{32}-.*))",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Parent Wf Exec Id",
+    },
   },
   type: "object",
   required: [
@@ -4110,14 +4527,32 @@ export const $WorkflowExecutionResponse = {
     "task_queue",
     "history_length",
   ],
-  title: "WorkflowExecutionResponse",
+  title: "WorkflowExecutionReadMinimal",
+} as const
+
+export const $WorkflowExecutionTerminate = {
+  properties: {
+    reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Reason",
+    },
+  },
+  type: "object",
+  title: "WorkflowExecutionTerminate",
 } as const
 
 export const $WorkflowRead = {
   properties: {
     id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
+      pattern: "wf_[0-9a-zA-Z]+",
       title: "Id",
     },
     title: {
@@ -4264,7 +4699,7 @@ export const $WorkflowReadMinimal = {
   properties: {
     id: {
       type: "string",
-      pattern: "wf-[0-9a-f]{32}",
+      pattern: "wf_[0-9a-zA-Z]+",
       title: "Id",
     },
     title: {

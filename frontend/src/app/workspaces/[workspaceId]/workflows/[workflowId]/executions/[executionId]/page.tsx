@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { EventHistoryResponse } from "@/client"
+import { WorkflowExecutionEvent } from "@/client"
 
 import {
   ResizableHandle,
@@ -14,6 +14,7 @@ import "react18-json-view/src/style.css"
 import { useParams } from "next/navigation"
 import { History } from "lucide-react"
 
+import { formatExecutionId } from "@/lib/event-history"
 import { WorkflowExecutionEventDetailView } from "@/components/executions/event-details"
 import { WorkflowExecutionEventHistory } from "@/components/executions/event-history"
 import { SectionHead } from "@/components/executions/section"
@@ -27,10 +28,10 @@ export default function ExecutionPage() {
   }>()
 
   const [selectedEvent, setSelectedEvent] = React.useState<
-    EventHistoryResponse | undefined
+    WorkflowExecutionEvent | undefined
   >()
 
-  const fullExecutionId = `${workflowId}:${executionId}`
+  const fullExecutionId = formatExecutionId(workflowId, executionId)
   return (
     <ResizablePanelGroup
       direction="horizontal"

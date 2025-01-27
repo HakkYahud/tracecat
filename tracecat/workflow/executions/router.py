@@ -1,88 +1,141 @@
 import temporalio.service
 from fastapi import (
     APIRouter,
-    Depends,
     HTTPException,
     Query,
     status,
 )
 from sqlalchemy.exc import NoResultFound
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import col, select
 
 from tracecat.auth.dependencies import WorkspaceUserRole
-from tracecat.db.engine import get_async_session
+from tracecat.auth.enums import SpecialUserID
+from tracecat.db.dependencies import AsyncDBSession
 from tracecat.db.schemas import WorkflowDefinition
 from tracecat.dsl.common import DSLInput
-from tracecat.identifiers import WorkflowID
+from tracecat.identifiers import UserID
+from tracecat.identifiers.workflow import OptionalAnyWorkflowIDQuery, WorkflowUUID
 from tracecat.logger import logger
 from tracecat.types.exceptions import TracecatValidationError
 from tracecat.workflow.executions.dependencies import UnquotedExecutionID
+from tracecat.workflow.executions.enums import TriggerType
 from tracecat.workflow.executions.models import (
-    CreateWorkflowExecutionParams,
-    CreateWorkflowExecutionResponse,
-    EventHistoryResponse,
-    TerminateWorkflowExecutionParams,
-    WorkflowExecutionResponse,
+    WorkflowExecutionCreate,
+    WorkflowExecutionCreateResponse,
+    WorkflowExecutionRead,
+    WorkflowExecutionReadCompact,
+    WorkflowExecutionReadMinimal,
+    WorkflowExecutionTerminate,
 )
 from tracecat.workflow.executions.service import WorkflowExecutionsService
 
-router = APIRouter(prefix="/workflow-executions")
+router = APIRouter(prefix="/workflow-executions", tags=["workflow-executions"])
 
 
-@router.get("", tags=["workflow-executions"])
+@router.get("")
 async def list_workflow_executions(
     role: WorkspaceUserRole,
     # Filters
-    workflow_id: WorkflowID | None = Query(None),
-) -> list[WorkflowExecutionResponse]:
+    workflow_id: OptionalAnyWorkflowIDQuery,
+    trigger_types: set[TriggerType] | None = Query(None, alias="trigger"),
+    triggered_by_user_id: UserID | SpecialUserID | None = Query(None, alias="user_id"),
+    limit: int | None = Query(None, alias="limit"),
+) -> list[WorkflowExecutionReadMinimal]:
     """List all workflow executions."""
     service = await WorkflowExecutionsService.connect(role=role)
-    if workflow_id:
-        executions = await service.list_executions_by_workflow_id(workflow_id)
-    else:
-        executions = await service.list_executions()
+    if triggered_by_user_id == SpecialUserID.CURRENT:
+        if role.user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User ID is required to filter by user ID",
+            )
+        triggered_by_user_id = role.user_id
+    executions = await service.list_executions(
+        workflow_id=workflow_id,
+        trigger_types=trigger_types,
+        triggered_by_user_id=triggered_by_user_id,
+        limit=limit,
+    )
     return [
-        WorkflowExecutionResponse.from_dataclass(execution) for execution in executions
+        WorkflowExecutionReadMinimal.from_dataclass(execution)
+        for execution in executions
     ]
 
 
-@router.get("/{execution_id}", tags=["workflow-executions"])
+@router.get("/{execution_id}")
 async def get_workflow_execution(
+    role: WorkspaceUserRole, execution_id: UnquotedExecutionID
+) -> WorkflowExecutionRead:
+    """Get a workflow execution."""
+    logger.info("Getting workflow execution", execution_id=execution_id)
+    service = await WorkflowExecutionsService.connect(role=role)
+    execution = await service.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow execution not found",
+        )
+    logger.info("Getting workflow execution events", execution_id=execution.id)
+    events = await service.list_workflow_execution_events(execution.id)
+    return WorkflowExecutionRead(
+        id=execution.id,
+        run_id=execution.run_id,
+        start_time=execution.start_time,
+        execution_time=execution.execution_time,
+        close_time=execution.close_time,
+        status=execution.status,
+        workflow_type=execution.workflow_type,
+        task_queue=execution.task_queue,
+        history_length=execution.history_length,
+        events=events,
+    )
+
+
+@router.get("/{execution_id}/compact")
+async def get_workflow_execution_compact(
     role: WorkspaceUserRole,
     execution_id: UnquotedExecutionID,
-) -> WorkflowExecutionResponse:
+) -> WorkflowExecutionReadCompact:
     """Get a workflow execution."""
     service = await WorkflowExecutionsService.connect(role=role)
     execution = await service.get_execution(execution_id)
-    return WorkflowExecutionResponse.from_dataclass(execution)
+    if not execution:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow execution not found",
+        )
+
+    compact_events = await service.list_workflow_execution_events_compact(execution_id)
+    return WorkflowExecutionReadCompact(
+        id=execution.id,
+        parent_wf_exec_id=execution.parent_id,
+        run_id=execution.run_id,
+        start_time=execution.start_time,
+        execution_time=execution.execution_time,
+        close_time=execution.close_time,
+        status=execution.status,
+        workflow_type=execution.workflow_type,
+        task_queue=execution.task_queue,
+        history_length=execution.history_length,
+        events=compact_events,
+    )
 
 
-@router.get("/{execution_id}/history", tags=["workflow-executions"])
-async def list_workflow_execution_event_history(
-    role: WorkspaceUserRole,
-    execution_id: UnquotedExecutionID,
-) -> list[EventHistoryResponse]:
-    """Get a workflow execution."""
-    service = await WorkflowExecutionsService.connect(role=role)
-    events = await service.list_workflow_execution_event_history(execution_id)
-    return events
-
-
-@router.post("", tags=["workflow-executions"])
+@router.post("")
 async def create_workflow_execution(
     role: WorkspaceUserRole,
-    params: CreateWorkflowExecutionParams,
-    session: AsyncSession = Depends(get_async_session),
-) -> CreateWorkflowExecutionResponse:
+    params: WorkflowExecutionCreate,
+    session: AsyncDBSession,
+) -> WorkflowExecutionCreateResponse:
     """Create and schedule a workflow execution."""
     service = await WorkflowExecutionsService.connect(role=role)
     # Get the dslinput from the workflow definition
+    wf_id = WorkflowUUID.new(params.workflow_id)
     try:
         result = await session.exec(
             select(WorkflowDefinition)
-            .where(WorkflowDefinition.workflow_id == params.workflow_id)
-            .order_by(WorkflowDefinition.version.desc())  # type: ignore
+            .where(WorkflowDefinition.workflow_id == wf_id)
+            .order_by(col(WorkflowDefinition.version).desc())
         )
         defn = result.first()
         if not defn:
@@ -96,9 +149,7 @@ async def create_workflow_execution(
     dsl_input = DSLInput(**defn.content)
     try:
         response = service.create_workflow_execution_nowait(
-            dsl=dsl_input,
-            wf_id=params.workflow_id,
-            payload=params.inputs,
+            dsl=dsl_input, wf_id=wf_id, payload=params.inputs
         )
         return response
     except TracecatValidationError as e:
@@ -115,7 +166,6 @@ async def create_workflow_execution(
 @router.post(
     "/{execution_id}/cancel",
     status_code=status.HTTP_204_NO_CONTENT,
-    tags=["workflow-executions"],
 )
 async def cancel_workflow_execution(
     role: WorkspaceUserRole,
@@ -138,12 +188,11 @@ async def cancel_workflow_execution(
 @router.post(
     "/{execution_id}/terminate",
     status_code=status.HTTP_204_NO_CONTENT,
-    tags=["workflow-executions"],
 )
 async def terminate_workflow_execution(
     role: WorkspaceUserRole,
     execution_id: UnquotedExecutionID,
-    params: TerminateWorkflowExecutionParams,
+    params: WorkflowExecutionTerminate,
 ) -> None:
     """Get a workflow execution."""
     service = await WorkflowExecutionsService.connect(role=role)

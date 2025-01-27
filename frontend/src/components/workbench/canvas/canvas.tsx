@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -149,7 +150,14 @@ export function isEphemeral<T>(node: Node<T>): boolean {
   return ephemeralNodeTypes.includes(node?.type as string)
 }
 
-export function WorkflowCanvas() {
+export interface WorkflowCanvasRef {
+  centerOnNode: (nodeId: string) => void
+}
+
+export const WorkflowCanvas = React.forwardRef<
+  WorkflowCanvasRef,
+  React.ComponentPropsWithoutRef<typeof ReactFlow>
+>((props, ref) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const connectingNodeId = useRef<string | null>(null)
   const connectingHandleId = useRef<string | null>(null)
@@ -237,6 +245,25 @@ export function WorkflowCanvas() {
     []
   )
 
+  const dropSelectorNode = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      const x = (event as MouseEvent).clientX - defaultNodeWidth / 2
+      const y = (event as MouseEvent).clientY - defaultNodeHeight / 2
+      const id = getId()
+      const newNode = {
+        id,
+        type: SelectorTypename,
+        position: screenToFlowPosition({ x, y }),
+        data: {},
+        origin: [0.5, 0.0],
+      } as Node
+
+      setNodes((nds) => nds.concat(newNode))
+      return newNode
+    },
+    [screenToFlowPosition]
+  ) // eslint-disable-line react-hooks/exhaustive-deps
+
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
       event.preventDefault()
@@ -249,18 +276,8 @@ export function WorkflowCanvas() {
         )
 
         if (targetIsPane) {
-          const x = (event as MouseEvent).clientX - defaultNodeWidth / 2
-          const y = (event as MouseEvent).clientY - defaultNodeHeight / 2
-          const id = getId()
-          const newNode = {
-            id,
-            type: SelectorTypename,
-            position: screenToFlowPosition({ x, y }),
-            data: {},
-            origin: [0.5, 0.0],
-          } as Node
-
-          setNodes((nds) => nds.concat(newNode))
+          const newNode = dropSelectorNode(event)
+          const id = newNode.id
 
           const edge = {
             id,
@@ -420,6 +437,44 @@ export function WorkflowCanvas() {
     }
   }
 
+  // Add this function to center on a node
+  const centerOnNode = useCallback(
+    (nodeId: string) => {
+      if (!reactFlowInstance) return
+
+      const node = reactFlowInstance.getNode(nodeId)
+      console.log("center on node", node)
+      if (!node) return
+
+      // Get the node's position and dimensions
+      const x = node.position.x + (node.width ?? defaultNodeWidth) / 2
+      const y = node.position.y + (node.height ?? defaultNodeHeight) / 2
+
+      // Animate to the node's center position
+      reactFlowInstance.setCenter(x, y, { duration: 800 })
+    },
+    [reactFlowInstance]
+  )
+
+  // Export the centerOnNode function through useImperativeHandle
+  useImperativeHandle(
+    ref,
+    () => ({
+      centerOnNode,
+    }),
+    [centerOnNode]
+  )
+
+  // Right click context menu
+  const onPaneContextMenu = useCallback(
+    (event: ReactMouseEvent | ReactTouchEvent) => {
+      event.preventDefault()
+      if (!reactFlowInstance) return
+      dropSelectorNode(event.nativeEvent)
+    },
+    [reactFlowInstance] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
   return (
     <div ref={containerRef} style={{ height: "100%", width: "100%" }}>
       <ReactFlow
@@ -447,6 +502,8 @@ export function WorkflowCanvas() {
         minZoom={0.25}
         panOnScroll
         connectionLineType={ConnectionLineType.SmoothStep}
+        // onContextMenu={onPaneContextMenu}
+        onPaneContextMenu={onPaneContextMenu}
       >
         <Background />
         <Controls className="rounded-sm" fitViewOptions={fitViewOptions} />
@@ -480,7 +537,9 @@ export function WorkflowCanvas() {
       </ReactFlow>
     </div>
   )
-}
+})
+
+WorkflowCanvas.displayName = "WorkflowCanvas"
 
 function NodeSilhouette({
   position,

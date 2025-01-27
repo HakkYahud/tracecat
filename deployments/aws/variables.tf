@@ -7,13 +7,13 @@ variable "aws_region" {
 
 variable "aws_account_id" {
   type        = string
-  description = "The AWS account to deploy Tracecat into"
+  description = "(Optional) Account ID to deploy Tracecat into. Only required if deploying cross-account."
   default     = null
 }
 
 variable "aws_role_name" {
   type        = string
-  description = "The name of the AWS role for Terraform to assume to deploy Tracecat"
+  description = "(Optional) AWS role name for Terraform to assume to deploy Tracecat. Only required if deploying cross-account."
   default     = null
 }
 
@@ -50,6 +50,12 @@ variable "setting_override_saml_enabled" {
   default     = null
 }
 
+variable "setting_override_basic_auth_enabled" {
+  type        = string
+  description = "Override the basic auth setting"
+  default     = null
+}
+
 
 ### Images and Versions
 
@@ -65,7 +71,7 @@ variable "tracecat_ui_image" {
 
 variable "tracecat_image_tag" {
   type    = string
-  default = "0.20.2"
+  default = "0.21.9"
 }
 
 variable "temporal_server_image" {
@@ -111,7 +117,7 @@ variable "TFC_CONFIGURATION_VERSION_GIT_COMMIT_SHA" {
 variable "disable_temporal_ui" {
   type        = bool
   description = "Whether to disable the Temporal UI service in the deployment"
-  default     = false
+  default     = true
 }
 
 variable "disable_temporal_autosetup" {
@@ -263,22 +269,22 @@ variable "api_memory" {
 
 variable "worker_cpu" {
   type    = string
-  default = "2048"
+  default = "8192"
 }
 
 variable "worker_memory" {
   type    = string
-  default = "4096"
+  default = "16384"
 }
 
 variable "executor_cpu" {
   type    = string
-  default = "2048"
+  default = "8192"
 }
 
 variable "executor_memory" {
   type    = string
-  default = "4096"
+  default = "16384"
 }
 
 variable "executor_client_timeout" {
@@ -288,12 +294,12 @@ variable "executor_client_timeout" {
 
 variable "ui_cpu" {
   type    = string
-  default = "256"
+  default = "512"
 }
 
 variable "ui_memory" {
   type    = string
-  default = "512"
+  default = "1024"
 }
 
 variable "temporal_cpu" {

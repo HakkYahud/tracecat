@@ -29,9 +29,10 @@ from typing_extensions import Doc
 
 from tracecat import config
 from tracecat.contexts import ctx_role
+from tracecat.db.engine import get_async_session_context_manager
 from tracecat.expressions.expectations import create_expectation_model
 from tracecat.expressions.validation import TemplateValidator
-from tracecat.git import get_git_repository_sha, parse_git_url
+from tracecat.git import GitUrl, get_git_repository_sha, parse_git_url
 from tracecat.logger import logger
 from tracecat.parse import safe_url
 from tracecat.registry.actions.models import BoundRegistryAction, TemplateAction
@@ -41,14 +42,8 @@ from tracecat.registry.constants import (
 )
 from tracecat.registry.repositories.models import RegistryRepositoryCreate
 from tracecat.registry.repositories.service import RegistryReposService
-from tracecat.secrets.service import SecretsService
 from tracecat.settings.service import get_setting
-from tracecat.ssh import (
-    SshEnv,
-    add_host_to_known_hosts,
-    add_ssh_key_to_agent,
-    temporary_ssh_agent,
-)
+from tracecat.ssh import SshEnv, ssh_context
 from tracecat.types.auth import Role
 from tracecat.types.exceptions import RegistryError
 
@@ -59,12 +54,13 @@ type F = Callable[..., Any]
 class RegisterKwargs(BaseModel):
     namespace: str
     description: str
-    default_title: str | None
-    display_group: str | None
-    doc_url: str | None
-    author: str | None
-    secrets: list[RegistrySecret] | None
-    include_in_schema: bool
+    default_title: str | None = None
+    display_group: str | None = None
+    doc_url: str | None = None
+    author: str | None = None
+    deprecated: str | None = None
+    secrets: list[RegistrySecret] | None = None
+    include_in_schema: bool = True
 
 
 class Repository:
@@ -117,10 +113,6 @@ class Repository:
         """Retrieve a registered udf."""
         return self._store[name]
 
-    def safe_remote_url(self, remote_registry_url: str) -> str:
-        """Clean a remote registry url."""
-        return safe_url(remote_registry_url)
-
     def init(self, include_base: bool = True, include_templates: bool = True) -> None:
         """Initialize the registry."""
         if not self._is_initialized:
@@ -157,6 +149,7 @@ class Repository:
         display_group: str | None,
         doc_url: str | None,
         author: str | None,
+        deprecated: str | None,
         include_in_schema: bool,
         template_action: TemplateAction | None = None,
         origin: str = DEFAULT_REGISTRY_ORIGIN,
@@ -169,6 +162,7 @@ class Repository:
             type=type,
             doc_url=doc_url,
             author=author,
+            deprecated=deprecated,
             secrets=secrets,
             args_cls=args_cls,
             args_docs=args_docs,
@@ -201,6 +195,7 @@ class Repository:
             description=defn.description,
             doc_url=defn.doc_url,
             author=defn.author,
+            deprecated=defn.deprecated,
             secrets=defn.secrets,
             args_cls=create_expectation_model(
                 expectation, defn.action.replace(".", "__")
@@ -218,11 +213,6 @@ class Repository:
             template_action=template_action,
             origin=origin,
         )
-
-    def _reset(self) -> None:
-        logger.warning("Resetting registry")
-        self._store = {}
-        self._is_initialized = False
 
     def _load_base_udfs(self) -> None:
         """Load all udfs and template actions into the registry."""
@@ -258,12 +248,12 @@ class Repository:
             or {"github.com"},
         )
 
+        cleaned_url = safe_url(self._origin)
         try:
-            git_url = parse_git_url(self._origin, allowed_domains=allowed_domains)
+            git_url = parse_git_url(cleaned_url, allowed_domains=allowed_domains)
             host = git_url.host
             org = git_url.org
             repo_name = git_url.repo
-            branch = git_url.branch
         except ValueError as e:
             raise RegistryError(
                 "Invalid Git repository URL. Please provide a valid Git SSH URL (git+ssh)."
@@ -283,38 +273,36 @@ class Repository:
             org=org,
             repo=repo_name,
             package_name=package_name,
-            ref=branch,
         )
 
-        cleaned_url = self.safe_remote_url(self._origin)
-        logger.debug("Cleaned URL", url=cleaned_url)
+        logger.debug("Git URL", git_url=git_url)
         commit_sha = await self._install_remote_repository(
-            host=host, repo_url=cleaned_url, commit_sha=commit_sha
+            git_url=git_url, commit_sha=commit_sha
         )
         module = await self._load_remote_repository(cleaned_url, package_name)
         logger.info(
             "Imported and reloaded remote repository",
             module_name=module.__name__,
             package_name=package_name,
+            commit_sha=commit_sha,
         )
         return commit_sha
 
     async def _install_remote_repository(
-        self, host: str, repo_url: str, commit_sha: str | None = None
+        self, git_url: GitUrl, commit_sha: str | None = None
     ) -> str:
         """Install the remote repository into the filesystem and return the commit sha."""
 
-        logger.info("Getting SSH key", role=self.role)
-        async with SecretsService.with_session(role=self.role) as service:
-            secret = await service.get_ssh_key()
-
-        async with temporary_ssh_agent() as env:
-            logger.info("Entered temporary SSH agent context")
-            await add_ssh_key_to_agent(secret.reveal().value, env=env)
-            await add_host_to_known_hosts(host, env=env)
+        url = git_url.to_url()
+        async with (
+            get_async_session_context_manager() as session,
+            ssh_context(role=self.role, git_url=git_url, session=session) as env,
+        ):
+            if env is None:
+                raise RegistryError("No SSH key found")
             if commit_sha is None:
-                commit_sha = await get_git_repository_sha(repo_url, env=env)
-            await install_remote_repository(repo_url, commit_sha=commit_sha, env=env)
+                commit_sha = await get_git_repository_sha(url, env=env)
+            await install_remote_repository(url, commit_sha=commit_sha, env=env)
         return commit_sha
 
     async def _load_remote_repository(
@@ -382,6 +370,7 @@ class Repository:
             description=validated_kwargs.description,
             doc_url=validated_kwargs.doc_url,
             author=validated_kwargs.author,
+            deprecated=validated_kwargs.deprecated,
             secrets=validated_kwargs.secrets,
             default_title=validated_kwargs.default_title,
             display_group=validated_kwargs.display_group,

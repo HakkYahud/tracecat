@@ -32,6 +32,7 @@ with workflow.unsafe.imports_passed_through():
         ValidateActionActivityInput,
     )
     from tracecat.dsl.common import (
+        ChildWorkflowMemo,
         DSLInput,
         DSLRunArgs,
         ExecuteChildWorkflowArgs,
@@ -111,6 +112,7 @@ retry_policies = {
         maximum_attempts=1,
         non_retryable_error_types=non_retryable_error_types,
     ),
+    "activity:fail_slow": RetryPolicy(maximum_attempts=6),
     "workflow:fail_fast": RetryPolicy(
         # XXX: Do not set max attempts to 0, it will default to unlimited
         maximum_attempts=1,
@@ -188,7 +190,7 @@ class DSLWorkflow:
             )
             # 1. Get the error handler workflow ID
             handler_wf_id = await self._get_error_handler_workflow_id(args)
-            if not handler_wf_id:
+            if handler_wf_id is None:
                 self.logger.warning("No error handler workflow ID found, raising error")
                 raise e
 
@@ -246,7 +248,7 @@ class DSLWorkflow:
             # 1. runtime_config.environment (override by caller)
             # 2. dsl.config.environment (set in wf defn)
 
-            logger.warning(
+            logger.debug(
                 "Runtime config was set",
                 args_config=args.runtime_config,
                 dsl_config=self.dsl.config,
@@ -255,12 +257,12 @@ class DSLWorkflow:
             self.runtime_config = self.dsl.config.model_copy(update=set_fields)
         else:
             # Otherwise default to the DSL config
-            logger.warning(
+            logger.debug(
                 "Runtime config was not set, using DSL config",
                 dsl_config=self.dsl.config,
             )
             self.runtime_config = self.dsl.config
-        logger.warning("Runtime config after", runtime_config=self.runtime_config)
+        logger.debug("Runtime config after", runtime_config=self.runtime_config)
 
         # Consolidate trigger inputs
         if args.schedule_id:
@@ -503,7 +505,7 @@ class DSLWorkflow:
             child_run_args.runtime_config.environment = (
                 args.get("environment") or child_run_args.dsl.config.environment
             )
-            return await self._run_child_workflow(child_run_args)
+            return await self._run_child_workflow(task, child_run_args)
 
     async def _execute_child_workflow_loop(
         self,
@@ -538,6 +540,7 @@ class DSLWorkflow:
         for batch in itertools.batched(iterator(), batch_size):
             batch_result = await self._execute_child_workflow_batch(
                 batch=batch,
+                task=task,
                 base_run_args=child_run_args,
                 fail_strategy=fail_strategy,
             )
@@ -547,6 +550,7 @@ class DSLWorkflow:
     async def _execute_child_workflow_batch(
         self,
         batch: Iterable[ExecuteChildWorkflowArgs],
+        task: ActionStatement,
         base_run_args: DSLRunArgs,
         *,
         fail_strategy: FailStrategy = FailStrategy.ISOLATED,
@@ -573,7 +577,7 @@ class DSLWorkflow:
                         fail_strategy=fail_strategy,
                         patched_run_args=patched_run_args,
                     )
-                    tg.create_task(self._run_child_workflow(patched_run_args))
+                    tg.create_task(self._run_child_workflow(task, patched_run_args))
             return tg.results()
         else:
             # Isolated
@@ -584,7 +588,7 @@ class DSLWorkflow:
                     fail_strategy=fail_strategy,
                     patched_run_args=patched_run_args,
                 )
-                coro = self._run_child_workflow(patched_run_args)
+                coro = self._run_child_workflow(task, patched_run_args)
                 coros.append(coro)
             gather_result = await asyncio.gather(*coros, return_exceptions=True)
             result: list[DSLExecutionError | Any] = [
@@ -635,7 +639,7 @@ class DSLWorkflow:
             get_workflow_definition_activity,
             arg=activity_inputs,
             start_to_close_timeout=self.start_to_close_timeout,
-            retry_policy=retry_policies["activity:fail_fast"],
+            retry_policy=retry_policies["activity:fail_slow"],
         )
 
     async def _validate_trigger_inputs(
@@ -759,10 +763,14 @@ class DSLWorkflow:
             ),
         )
 
-    async def _run_child_workflow(self, run_args: DSLRunArgs) -> Any:
+    async def _run_child_workflow(
+        self, task: ActionStatement, run_args: DSLRunArgs
+    ) -> Any:
         self.logger.info("Running child workflow", run_args=run_args)
         wf_exec_id = identifiers.workflow.generate_exec_id(run_args.wf_id)
         wf_info = workflow.info()
+        # Use Temporal memo to store the action ref in the child workflow run
+        memo = ChildWorkflowMemo(action_ref=task.ref)
         return await workflow.execute_child_workflow(
             DSLWorkflow.run,
             run_args,
@@ -772,6 +780,8 @@ class DSLWorkflow:
             task_queue=wf_info.task_queue,
             execution_timeout=wf_info.execution_timeout,
             task_timeout=wf_info.task_timeout,
+            memo=memo.model_dump(),
+            search_attributes=wf_info.typed_search_attributes,
         )
 
     def _should_execute_child_workflow(self, task: ActionStatement) -> bool:
@@ -851,4 +861,5 @@ class DSLWorkflow:
             task_queue=wf_info.task_queue,
             execution_timeout=wf_info.execution_timeout,
             task_timeout=wf_info.task_timeout,
+            search_attributes=wf_info.typed_search_attributes,
         )

@@ -141,7 +141,7 @@ export function OrgSettingsSsoForm() {
               </FormLabel>
               <FormControl>
                 <Input
-                  placeholder="http://localhost/api/auth/saml/acs"
+                  placeholder="http://localhost/auth/saml/acs"
                   {...field}
                   value={field.value ?? ""}
                   disabled

@@ -63,9 +63,9 @@ def _get_db_uri(driver: Literal["psycopg", "asyncpg"] = "psycopg") -> str:
         uri = get_connection_string(
             username=config.TRACECAT__DB_USER,
             password=password,
-            host=config.TRACECAT__DB_ENDPOINT,
-            port=config.TRACECAT__DB_PORT,
-            database=config.TRACECAT__DB_NAME,
+            host=config.TRACECAT__DB_ENDPOINT,  # type: ignore
+            port=config.TRACECAT__DB_PORT,  # type: ignore
+            database=config.TRACECAT__DB_NAME,  # type: ignore
             driver=driver,
         )
         logger.info("Successfully retrieved database password from AWS Secrets Manager")
@@ -74,9 +74,9 @@ def _get_db_uri(driver: Literal["psycopg", "asyncpg"] = "psycopg") -> str:
         uri = get_connection_string(
             username=config.TRACECAT__DB_USER,
             password=config.TRACECAT__DB_PASS,
-            host=config.TRACECAT__DB_ENDPOINT,
-            port=config.TRACECAT__DB_PORT,
-            database=config.TRACECAT__DB_NAME,
+            host=config.TRACECAT__DB_ENDPOINT,  # type: ignore
+            port=config.TRACECAT__DB_PORT,  # type: ignore
+            database=config.TRACECAT__DB_NAME,  # type: ignore
             driver=driver,
         )
     # Else use the default URI
@@ -112,10 +112,10 @@ def _create_db_engine() -> Engine:
 def _create_async_db_engine() -> AsyncEngine:
     # Postgres as default
     engine_kwargs = {
-        "pool_size": 50,
-        "max_overflow": 10,
-        "future": True,
-        "pool_recycle": 3600,
+        "pool_size": 100,
+        "max_overflow": 100,
+        "pool_recycle": 1000,  # Recycle connections after 30 mins
+        "pool_use_lifo": True,  # Better for burst workloads
     }
 
     uri = _get_db_uri(driver="asyncpg")

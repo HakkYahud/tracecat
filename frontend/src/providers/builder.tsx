@@ -6,6 +6,8 @@ import React, {
   SetStateAction,
   useCallback,
   useContext,
+  useEffect,
+  useRef,
   useState,
 } from "react"
 import { useWorkflow } from "@/providers/workflow"
@@ -18,7 +20,11 @@ import {
 } from "reactflow"
 
 import { pruneGraphObject } from "@/lib/workflow"
-import { NodeType } from "@/components/workbench/canvas/canvas"
+import {
+  NodeType,
+  WorkflowCanvasRef,
+} from "@/components/workbench/canvas/canvas"
+import { EventsSidebarRef } from "@/components/workbench/events/events-sidebar"
 
 interface ReactFlowContextType {
   reactFlow: ReactFlowInstance
@@ -28,6 +34,12 @@ interface ReactFlowContextType {
   getNode: (id: string) => NodeType | undefined
   setNodes: React.Dispatch<SetStateAction<Node[]>>
   setEdges: React.Dispatch<SetStateAction<Edge[]>>
+  setSelectedNodeId: React.Dispatch<SetStateAction<string | null>>
+  canvasRef: React.RefObject<WorkflowCanvasRef>
+  sidebarRef: React.RefObject<EventsSidebarRef>
+  isSidebarCollapsed: boolean
+  toggleSidebar: () => void
+  expandSidebarAndFocusEvents: () => void
 }
 
 const ReactFlowInteractionsContext = createContext<
@@ -45,9 +57,13 @@ export const WorkflowBuilderProvider: React.FC<
   const { workspaceId, workflowId, error, updateWorkflow } = useWorkflow()
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
-  if (!workflowId) {
-    throw new Error("No workflow ID provided")
-  }
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false)
+  const canvasRef = useRef<WorkflowCanvasRef>(null)
+  const sidebarRef = useRef<EventsSidebarRef>(null)
+
+  useEffect(() => {
+    setSelectedNodeId(null)
+  }, [workflowId])
 
   const setReactFlowNodes = useCallback(
     (nodes: NodeType[] | ((nodes: NodeType[]) => NodeType[])) => {
@@ -72,23 +88,75 @@ export const WorkflowBuilderProvider: React.FC<
       setSelectedNodeId(nodeSelected?.id ?? null)
     },
   })
+
+  const toggleSidebar = React.useCallback(() => {
+    setIsSidebarCollapsed((prev: boolean) => {
+      const newState = !prev
+      if (sidebarRef.current) {
+        if (newState) {
+          sidebarRef.current.collapse()
+        } else {
+          sidebarRef.current.expand()
+        }
+      }
+      return newState
+    })
+  }, [sidebarRef])
+
+  const expandSidebarAndFocusEvents = React.useCallback(() => {
+    setIsSidebarCollapsed(() => {
+      const newState = false
+      if (sidebarRef.current) {
+        sidebarRef.current.expand()
+        // sidebarRef.current.setActiveTab("workflow-events")
+      }
+      return newState
+    })
+  }, [sidebarRef])
+
+  const value = React.useMemo(
+    () => ({
+      workflowId,
+      workspaceId,
+      selectedNodeId,
+      getNode: reactFlowInstance.getNode,
+      setNodes: setReactFlowNodes,
+      setEdges: setReactFlowEdges,
+      setSelectedNodeId: setSelectedNodeId,
+      reactFlow: reactFlowInstance,
+      canvasRef,
+      sidebarRef,
+      isSidebarCollapsed,
+      toggleSidebar,
+      expandSidebarAndFocusEvents,
+    }),
+    [
+      workflowId,
+      workspaceId,
+      selectedNodeId,
+      reactFlowInstance,
+      setReactFlowNodes,
+      setReactFlowEdges,
+      setSelectedNodeId,
+      canvasRef,
+      sidebarRef,
+      isSidebarCollapsed,
+      toggleSidebar,
+      expandSidebarAndFocusEvents,
+    ]
+  )
+
+  // Don't render anything if no workflow is selected
+  if (!workflowId) {
+    return children
+  }
   if (error) {
     console.error("Builder: Error fetching workflow metadata:", error)
     throw error
   }
 
   return (
-    <ReactFlowInteractionsContext.Provider
-      value={{
-        workflowId,
-        workspaceId,
-        selectedNodeId,
-        getNode: reactFlowInstance.getNode,
-        setNodes: setReactFlowNodes,
-        setEdges: setReactFlowEdges,
-        reactFlow: reactFlowInstance,
-      }}
-    >
+    <ReactFlowInteractionsContext.Provider value={value}>
       {children}
     </ReactFlowInteractionsContext.Provider>
   )

@@ -8,6 +8,8 @@ from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from typing import Any, Self, cast
 
+import orjson
+import temporalio.api.common.v1
 import yaml
 from pydantic import (
     BaseModel,
@@ -34,7 +36,8 @@ from tracecat.dsl.view import RFEdge, RFGraph, RFNode, TriggerNode, UDFNode, UDF
 from tracecat.expressions import patterns
 from tracecat.expressions.common import ExprContext
 from tracecat.expressions.expectations import ExpectedField
-from tracecat.identifiers import ScheduleID, WorkflowID
+from tracecat.identifiers import ScheduleID
+from tracecat.identifiers.workflow import AnyWorkflowID, WorkflowUUID
 from tracecat.logger import logger
 from tracecat.parse import traverse_leaves
 from tracecat.types.auth import Role
@@ -214,7 +217,7 @@ class DSLInput(BaseModel):
 class DSLRunArgs(BaseModel):
     role: Role
     dsl: DSLInput | None = None
-    wf_id: WorkflowID
+    wf_id: WorkflowUUID
     trigger_inputs: TriggerInputs | None = None
     parent_run_context: RunContext | None = None
     runtime_config: DSLConfig = Field(
@@ -233,9 +236,15 @@ class DSLRunArgs(BaseModel):
         description="The schedule ID that triggered this workflow, if any.",
     )
 
+    @field_validator("wf_id", mode="before")
+    @classmethod
+    def validate_workflow_id(cls, v: AnyWorkflowID) -> WorkflowUUID:
+        """Convert any valid workflow ID format to WorkflowUUID."""
+        return WorkflowUUID.new(v)
+
 
 class ExecuteChildWorkflowArgs(BaseModel):
-    workflow_id: WorkflowID | None = None
+    workflow_id: WorkflowUUID | None = None
     workflow_alias: str | None = None
     trigger_inputs: TriggerInputs
     environment: str | None = None
@@ -259,6 +268,27 @@ class ExecuteChildWorkflowArgs(BaseModel):
                 },
             )
         return self
+
+    @field_validator("workflow_id", mode="before")
+    @classmethod
+    def validate_workflow_id(cls, v: AnyWorkflowID) -> WorkflowUUID:
+        """Convert any valid workflow ID format to WorkflowUUID."""
+        return WorkflowUUID.new(v)
+
+
+class ChildWorkflowMemo(BaseModel):
+    action_ref: str = Field(
+        ..., description="The action ref that initiated the child workflow."
+    )
+
+    @staticmethod
+    def from_temporal(memo: temporalio.api.common.v1.Memo) -> ChildWorkflowMemo:
+        try:
+            action_ref = orjson.loads(memo.fields["action_ref"].data)
+            return ChildWorkflowMemo(action_ref=action_ref)
+        except Exception as e:
+            logger.opt(exception=e).error("Error parsing child workflow memo")
+            raise e
 
 
 AdjDst = tuple[str, EdgeType]

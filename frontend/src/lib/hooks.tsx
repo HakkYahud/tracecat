@@ -8,7 +8,6 @@ import {
   ApiError,
   AuthSettingsRead,
   CreateWorkspaceParams,
-  EventHistoryResponse,
   GitSettingsRead,
   OAuthSettingsRead,
   organizationDeleteOrgMember,
@@ -37,8 +36,6 @@ import {
   RegistryRepositoriesDeleteRegistryRepositoryData,
   registryRepositoriesListRegistryRepositories,
   registryRepositoriesReloadRegistryRepositories,
-  registryRepositoriesSyncExecutorFromRegistryRepository,
-  RegistryRepositoriesSyncExecutorFromRegistryRepositoryData,
   registryRepositoriesSyncRegistryRepository,
   RegistryRepositoriesSyncRegistryRepositoryData,
   RegistryRepositoryReadMinimal,
@@ -83,8 +80,13 @@ import {
   UpsertWebhookParams,
   usersUsersPatchCurrentUser,
   UserUpdate,
-  WorkflowExecutionResponse,
-  workflowExecutionsListWorkflowExecutionEventHistory,
+  WorkflowExecutionCreate,
+  WorkflowExecutionRead,
+  WorkflowExecutionReadCompact,
+  WorkflowExecutionReadMinimal,
+  workflowExecutionsCreateWorkflowExecution,
+  workflowExecutionsGetWorkflowExecution,
+  workflowExecutionsGetWorkflowExecutionCompact,
   workflowExecutionsListWorkflowExecutions,
   WorkflowReadMinimal,
   workflowsAddTag,
@@ -461,7 +463,7 @@ export function useWorkflowExecutions(
     data: workflowExecutions,
     isLoading: workflowExecutionsIsLoading,
     error: workflowExecutionsError,
-  } = useQuery<WorkflowExecutionResponse[], Error>({
+  } = useQuery<WorkflowExecutionReadMinimal[], Error>({
     queryKey: ["workflow-executions", workflowId],
     queryFn: async () =>
       await workflowExecutionsListWorkflowExecutions({
@@ -477,33 +479,123 @@ export function useWorkflowExecutions(
   }
 }
 
-export function useWorkflowExecutionEventHistory(
-  workflowExecutionId: string,
+export function useWorkflowExecution(
+  executionId: string,
   options?: {
-    /**
-     * Refetch interval in milliseconds
-     */
     refetchInterval?: number
   }
 ) {
   const { workspaceId } = useWorkspace()
   const {
-    data: eventHistory,
-    isLoading: eventHistoryLoading,
-    error: eventHistoryError,
-  } = useQuery<EventHistoryResponse[], Error>({
-    queryKey: ["workflow-executions", workflowExecutionId, "event-history"],
+    data: execution,
+    isLoading: executionIsLoading,
+    error: executionError,
+  } = useQuery<WorkflowExecutionRead, ApiError>({
+    queryKey: ["workflow-executions", executionId],
     queryFn: async () =>
-      await workflowExecutionsListWorkflowExecutionEventHistory({
+      await workflowExecutionsGetWorkflowExecution({
         workspaceId,
-        executionId: workflowExecutionId,
+        executionId: executionId,
       }),
+    retry: retryHandler,
     ...options,
   })
   return {
-    eventHistory,
-    eventHistoryLoading,
-    eventHistoryError,
+    execution,
+    executionIsLoading,
+    executionError,
+  }
+}
+
+export function useCompactWorkflowExecution(
+  workflowExecutionId: string,
+  options?: {
+    refetchInterval?: number
+  }
+) {
+  // if execution ID contains non-url-safe characters, decode it
+  const { workspaceId } = useWorkspace()
+  const {
+    data: execution,
+    isLoading: executionIsLoading,
+    error: executionError,
+  } = useQuery<WorkflowExecutionReadCompact, ApiError>({
+    queryKey: ["compact-workflow-execution", workflowExecutionId],
+    queryFn: async () =>
+      await workflowExecutionsGetWorkflowExecutionCompact({
+        workspaceId,
+        executionId: workflowExecutionId,
+      }),
+    retry: retryHandler,
+    ...options,
+  })
+  return {
+    execution,
+    executionIsLoading,
+    executionError,
+  }
+}
+
+export function useManualWorkflowExecution(
+  workflowId: string,
+  options?: {
+    refetchInterval?: number
+  }
+) {
+  const queryClient = useQueryClient()
+  const { workspaceId } = useWorkspace()
+  // Create execution
+  const { mutateAsync: createExecution, isPending: createExecutionIsPending } =
+    useMutation({
+      mutationFn: async (params: WorkflowExecutionCreate) =>
+        await workflowExecutionsCreateWorkflowExecution({
+          workspaceId,
+          requestBody: params,
+        }),
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: ["last-manual-execution"],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ["last-manual-execution", workflowId],
+        })
+        // Force refetch
+        await queryClient.refetchQueries({
+          queryKey: ["last-manual-execution"],
+          type: "all",
+        })
+        await queryClient.refetchQueries({
+          queryKey: ["last-manual-execution", workflowId],
+          type: "all",
+        })
+      },
+    })
+  // Last execution
+  const {
+    data: lastExecution,
+    isLoading: lastExecutionIsLoading,
+    error: lastExecutionError,
+  } = useQuery<WorkflowExecutionReadMinimal | null, Error>({
+    queryKey: ["last-manual-execution", workflowId],
+    queryFn: async () => {
+      const executions = await workflowExecutionsListWorkflowExecutions({
+        workspaceId,
+        workflowId,
+        trigger: ["manual"],
+        limit: 1,
+        userId: "current",
+      })
+      return executions.length > 0 ? executions[0] : null
+    },
+    staleTime: 0,
+    ...options,
+  })
+  return {
+    lastExecution,
+    lastExecutionIsLoading,
+    lastExecutionError,
+    createExecution,
+    createExecutionIsPending,
   }
 }
 
@@ -1159,40 +1251,6 @@ export function useRegistryRepositories() {
     },
   })
 
-  const {
-    mutateAsync: syncExecutor,
-    isPending: syncExecutorIsPending,
-    error: syncExecutorError,
-  } = useMutation({
-    mutationFn: async (
-      params: RegistryRepositoriesSyncExecutorFromRegistryRepositoryData
-    ) => await registryRepositoriesSyncExecutorFromRegistryRepository(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["registry_repositories"] })
-      queryClient.invalidateQueries({ queryKey: ["registry_actions"] })
-      toast({
-        title: "Synced executor",
-        description: "Executor synced successfully.",
-      })
-    },
-    onError: (error: TracecatApiError) => {
-      const apiError = error as TracecatApiError
-      switch (apiError.status) {
-        case 403:
-          toast({
-            title: "You cannot perform this action",
-            description: `${apiError.message}: ${apiError.body.detail}`,
-          })
-          break
-        default:
-          toast({
-            title: "Failed to sync executor",
-            description: `An unexpected error occurred while syncing the executor. ${apiError.message}: ${apiError.body.detail}`,
-          })
-      }
-    },
-  })
-
   return {
     repos,
     reposIsLoading,
@@ -1203,9 +1261,6 @@ export function useRegistryRepositories() {
     deleteRepo,
     deleteRepoIsPending,
     deleteRepoError,
-    syncExecutor,
-    syncExecutorIsPending,
-    syncExecutorError,
   }
 }
 

@@ -85,7 +85,26 @@ def mock_package(tmp_path):
                 )
             )
 
+        # Create a file for the deprecated function
+        with open(os.path.join(tmp_path, "deprecated_function.py"), "w") as f:
+            f.write(
+                textwrap.dedent(
+                    """
+                from tracecat_registry import registry
+
+                @registry.register(
+                    description="This is a deprecated function",
+                    namespace="test",
+                    deprecated="This function is deprecated",
+                )
+                def deprecated_function(num: int) -> int:
+                    return num
+            """
+                )
+            )
+
         yield test_module
+
     finally:
         # Clean up
         del sys.modules["test_module"]
@@ -122,6 +141,18 @@ def test_udf_validate_args(mock_package):
         udf.validate_args(num="not a number")
 
 
+def test_deprecated_function_can_be_registered(mock_package):
+    """Test that a deprecated function can be registered."""
+    repo = Repository()
+    repo._register_udfs_from_package(mock_package)
+
+    udf = repo.get("test.deprecated_function")
+    assert udf is not None
+
+    # Check descriptors
+    assert udf.deprecated == "This function is deprecated"
+
+
 def test_registry_function_can_be_called(mock_package):
     """We need to test that the ordering of the workflow tasks is correct."""
     repo = Repository()
@@ -154,17 +185,17 @@ async def test_registry_async_function_can_be_called(mock_package):
                 host="github.com",
                 org="org",
                 repo="repo",
-                branch="main",
+                ref=None,
             ),
         ),
-        # GitHub (with branch)
+        # GitHub (with branch/sha)
         (
-            "git+ssh://git@github.com/org/repo@branch",
+            "git+ssh://git@github.com/org/repo@branchOrSHAOrTag",
             GitUrl(
                 host="github.com",
                 org="org",
                 repo="repo",
-                branch="branch",
+                ref="branchOrSHAOrTag",
             ),
         ),
         # GitLab
@@ -174,7 +205,7 @@ async def test_registry_async_function_can_be_called(mock_package):
                 host="gitlab.com",
                 org="org",
                 repo="repo",
-                branch="main",
+                ref=None,
             ),
         ),
         # GitLab (with branch)
@@ -184,9 +215,29 @@ async def test_registry_async_function_can_be_called(mock_package):
                 host="gitlab.com",
                 org="org",
                 repo="repo",
-                branch="branch",
+                ref="branch",
             ),
         ),
+        # Private GitLab
+        (
+            "git+ssh://git@internal.tracecat/org/repo",
+            GitUrl(
+                host="internal.tracecat",
+                org="org",
+                repo="repo",
+                ref=None,
+            ),
+        ),
+        # # Private GitLab nested in a subdirectory
+        # (
+        #     "git+ssh://git@internal.tracecat/org/group/repo",
+        #     GitUrl(
+        #         host="internal.tracecat",
+        #         org="org/group",
+        #         repo="repo",
+        #         ref=None,
+        #     ),
+        # ),
     ],
 )
 def test_parse_git_url(url: str, expected: GitUrl):

@@ -35,7 +35,7 @@ dotenv_replace() {
 
 echo -e "${YELLOW}Creating .env...${NC}"
 
-# Check that docker exists and is running 
+# Check that docker exists and is running
 if !  docker ps &> /dev/null
 then
     echo -e "${RED}Docker could not be found. Please check if installed and running.${NC}"
@@ -62,7 +62,7 @@ if [ ! -e ".env.example" ] ; then
 fi
 env_file=".env"
 
-if ! openssl &> /dev/null
+if ! openssl --help &> /dev/null
 then
   echo  -e "${RED}Could not run openssl. Please check if openssl is correctly installed."
   exit 1
@@ -105,8 +105,9 @@ while true; do
     esac
 done
 
-# Prompt user for new IP address
+# Prompt user for new IP address and strip http:// or https://
 read -p "Enter the new IP address or domain (default: localhost): " new_ip
+new_ip=$(sed -E 's/^\s*.*:\/\///g' <<< $new_ip)
 new_ip=${new_ip:-localhost}
 
 # Prompt user for PostgreSQL SSL mode

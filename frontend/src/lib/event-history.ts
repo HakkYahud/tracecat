@@ -1,12 +1,12 @@
 import { Buffer } from "buffer"
-import { EventHistoryResponse } from "@/client"
+import { WorkflowExecutionEvent } from "@/client"
 
 export const decode = (str: string): string =>
   Buffer.from(str, "base64").toString("binary")
 export const encode = (str: string): string =>
   Buffer.from(str, "binary").toString("base64")
 
-export const ERROR_EVENT_TYPES: EventHistoryResponse["event_type"][] = [
+export const ERROR_EVENT_TYPES: WorkflowExecutionEvent["event_type"][] = [
   "WORKFLOW_EXECUTION_FAILED",
   "WORKFLOW_EXECUTION_TERMINATED",
   "WORKFLOW_EXECUTION_TIMED_OUT",
@@ -14,46 +14,20 @@ export const ERROR_EVENT_TYPES: EventHistoryResponse["event_type"][] = [
   "ACTIVITY_TASK_TIMED_OUT",
   "CHILD_WORKFLOW_EXECUTION_FAILED",
 ] as const
-export const SUCCESS_EVENT_TYPES: EventHistoryResponse["event_type"][] = [
+export const SUCCESS_EVENT_TYPES: WorkflowExecutionEvent["event_type"][] = [
   "ACTIVITY_TASK_COMPLETED",
   "WORKFLOW_EXECUTION_COMPLETED",
   "CHILD_WORKFLOW_EXECUTION_COMPLETED",
 ] as const
-export const STARTED_EVENT_TYPES: EventHistoryResponse["event_type"][] = [
+export const STARTED_EVENT_TYPES: WorkflowExecutionEvent["event_type"][] = [
   "ACTIVITY_TASK_STARTED",
   "WORKFLOW_EXECUTION_STARTED",
   "CHILD_WORKFLOW_EXECUTION_STARTED",
 ] as const
 
-export type Input = {
-  payloads: {
-    metadata: { encoding: string }
-    data: string // This is a base64 encoded string
-  }[]
-}
-
-export type WorkflowExecutionStartedDetails = {
-  workflowType: { name: string }
-  input: Input
-}
-export type WorkflowExecutionStartedEvent = Omit<
-  EventHistoryResponse,
-  "details"
-> & {
-  details: WorkflowExecutionStartedDetails
-}
-export type ActivityTaskScheduledEventDetails = {
-  activityId: string
-  activityType: { name: string }
-  input: Input
-  workflowTaskCompletedEventId: string
-}
-
-export type ActivityTaskStartedEvent = Omit<EventHistoryResponse, "details"> & {
-  details: ActivityTaskScheduledEventDetails
-}
-
-export function parseEventType(eventType: EventHistoryResponse["event_type"]) {
+export function parseEventType(
+  eventType: WorkflowExecutionEvent["event_type"]
+) {
   return eventType
     .toString()
     .split("_")
@@ -91,13 +65,47 @@ export function getRelativeTime(date: Date) {
  * - "wf-123:1234567890" -> ["wf-123", "1234567890"]
  * - "wf-123:1234567890:1" -> ["wf-123", "1234567890:1"]
  */
+/**
+ * Parses a full execution ID into workflow ID and execution ID components
+ * @param fullExecutionId - Full execution ID string in format "workflowId:executionId" or "workflowId/executionId"
+ * @returns Tuple of [workflowId, executionId]
+ * @throws Error if execution ID format is invalid
+ */
 export function parseExecutionId(fullExecutionId: string): [string, string] {
-  // Split at most once from the left, keeping any remaining colons in the second part
-  const splitIndex = fullExecutionId.indexOf(":")
-  if (splitIndex === -1) {
-    throw new Error("Invalid execution ID format - missing colon separator")
+  const separators = ["/", ":"]
+  for (const separator of separators) {
+    const splitIndex = fullExecutionId.indexOf(separator)
+    if (splitIndex !== -1) {
+      return [
+        fullExecutionId.slice(0, splitIndex),
+        fullExecutionId.slice(splitIndex + 1),
+      ]
+    }
   }
-  const workflowId = fullExecutionId.slice(0, splitIndex)
-  const executionId = fullExecutionId.slice(splitIndex + 1)
-  return [workflowId, executionId]
+  throw new Error("Invalid execution ID format - missing separator (: or /)")
+}
+
+/**
+ * Formats and URL encodes a workflow execution ID
+ * @param workflowId - ID of the workflow
+ * @param executionId - ID of the execution
+ * @returns URL encoded execution ID in format "workflowId/executionId"
+ */
+export function formatExecutionId(
+  workflowId: string,
+  executionId: string,
+  separator: string = "/"
+): string {
+  const encodedSeparator = encodeURIComponent(separator)
+  return `${workflowId}${encodedSeparator}${executionId}`
+}
+
+export type ExecutionId = {
+  wf: string
+  exec: string
+}
+
+export function executionId(fullExecutionId: string): ExecutionId {
+  const [wf, exec] = parseExecutionId(fullExecutionId)
+  return { wf, exec }
 }
