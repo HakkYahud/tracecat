@@ -6,29 +6,29 @@ definition:
   namespace: integrations.thehive
   name: create_case
   secrets:
-    - name: thehive
-      keys: ["apikey"]
+    - name: thehive4
+      keys: ["apikey", "url"]
   expects:
-    title:
+    title_case:
       type: str
       description: Case title
-    description:
+    description_case:
       type: str
       description: Description of the case, support markdown
-    tags:
+    template_case:
       type: str
-      description: Incident type
+      description: Template name to use when creating the case
   steps:
     - ref: create_case
       action: core.http_request
       args:
-        url: ${{ SECRETS.thehive.url }}/api/case
+        url: ${{ SECRETS.thehive4.url }}/api/case
         method: POST
         headers:
-          Authorization: Bearer ${{ SECRETS.thehive.apikey }}
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
           Content-Type: application/json
         payload:
-          title: ${{ inputs.title }}
-          description: ${{ inputs.description }}
-          tags: [${{ inputs.tags }}]
+          title: ${{ inputs.title_case }}
+          description: ${{ inputs.description_case }}
+          template: ${{ inputs.template_case }} 
   returns: ${{ steps.create_case.result }}

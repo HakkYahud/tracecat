@@ -1,10 +1,10 @@
 type: action
 definition:
-  title: Add Observable
-  description: Add observables to a case
-  display_group: TheHive
+  name: create_observable
   namespace: integrations.thehive
-  name: add_observable
+  title: Create Observable
+  description: Create observable in a case
+  display_group: TheHive
   secrets:
     - name: thehive4
       keys: ["apikey", "url"]
@@ -12,12 +12,15 @@ definition:
     id_case:
       type: str
       description: Case ID
+      default: null
     data_obs:
       type: str
       description: Value of the observable
+      default: null
     datatype_obs:
       type: str
-      description: Data type of the observable
+      description: Datatype of the observable
+      default: null
   steps:
     - ref: update_case
       action: core.http_request
@@ -25,9 +28,11 @@ definition:
         url: ${{ SECRETS.thehive4.url }}/api/case/${{ inputs.id_case }}/artifact
         method: POST
         headers:
-          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
           Content-Type: application/json
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
         payload:
-          data: ["${{ inputs.data_obs }}"]
-          dataType: ${{ inputs.datatype_obs }} 
+          data:
+            - ${{ inputs.data_obs }}
+          dataType: ${{ inputs.datatype_obs }}
+          mandatory: true
   returns: ${{ steps.update_case.result }}

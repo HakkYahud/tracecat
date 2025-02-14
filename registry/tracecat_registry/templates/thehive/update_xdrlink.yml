@@ -1,0 +1,32 @@
+type: action
+definition:
+  name: update_xdrlink
+  namespace: integrations.thehive
+  title: Update XDR Link custom field
+  description: Update XDR Link
+  display_group: TheHive
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    id_case:
+      type: str
+      description: Case ID
+      default: null
+    event_id:
+      type: int
+      description: Event ID value from XDR event
+      default: null
+  steps:
+    - ref: update_case
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/case/${{ inputs.id_case }}
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+        payload:
+          mandatory: true
+          customFields.xdr-link.string: https://xff.tehtris.net/Endpoint/events?id=${{ str(inputs.event_id) }}
+  returns: ${{ steps.update_case.result }}

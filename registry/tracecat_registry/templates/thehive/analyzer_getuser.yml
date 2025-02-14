@@ -1,0 +1,30 @@
+type: action
+definition:
+  name: analyzer_get_user
+  namespace: integrations.thehive
+  title: Analyzer_Get_User
+  description: Call the analyzer Get_User
+  display_group: TheHive
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    id_obs:
+      type: str
+      description: Observable ID
+      default: null
+  steps:
+    - ref: analyzer_cortex
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/connector/cortex/job
+        method: POST
+        headers:
+          Content-Type: application/json
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+        payload:
+          cortexId: local
+          mandatory: true
+          analyzerId: TehtrisAnalyzer_GetUser_1_0
+          artifactId: ${{ inputs.id_obs }}
+  returns: ${{ steps.analyzer_cortex.result }}

@@ -1,0 +1,30 @@
+type: action
+definition:
+  name: responder_get_system
+  namespace: integrations.thehive
+  title: Responder_Get_System
+  description: Call the responder Get_System
+  display_group: TheHive  
+  secrets:
+    - name: thehive4
+      keys: ["apikey", "url"]
+  expects:
+    id_obs:
+      type: str
+      description: Observable ID
+      default: null
+  steps:
+    - ref: responder_cortex
+      action: core.http_request
+      args:
+        url: ${{ SECRETS.thehive4.url }}/api/connector/cortex/action
+        method: POST
+        headers:
+          Content-Type: application/json
+          Authorization: Bearer ${{ SECRETS.thehive4.apikey }}
+        payload:
+          objectId: ${{ inputs.id_obs }}
+          mandatory: true
+          objectType: case_artifact
+          responderId: 2f42329e8d4dfab659f6bcad4832e567
+  returns: ${{ steps.responder_cortex.result }}
